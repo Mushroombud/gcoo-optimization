@@ -1,0 +1,61 @@
+- generic [ref=e2]:
+  - generic:
+    - generic:
+      - img
+  - generic:
+    - generic:
+      - img [ref=e323]:
+        - generic [ref=e324]:
+          - generic [ref=e825]: "0.0"
+          - generic [ref=e827]: "0.3"
+          - generic [ref=e829]: "0.5"
+          - generic [ref=e831]: "0.8"
+          - generic [ref=e833]: "1.0"
+          - generic [ref=e835]: GCOO map metric
+      - generic [ref=e836]:
+        - button "Zoom in" [ref=e837] [cursor=pointer]: +
+        - button "Zoom out" [ref=e838] [cursor=pointer]: −
+        - button "Full Screen" [ref=e839] [cursor=pointer]
+      - generic [ref=e841]:
+        - generic [ref=e842]:
+          - generic [ref=e844]:
+            - radio "CartoDB positron" [ref=e845]
+            - text: CartoDB positron
+          - generic [ref=e847]:
+            - radio "OpenStreetMap" [checked] [ref=e848]
+            - text: OpenStreetMap
+        - generic [ref=e850]:
+          - generic [ref=e852]:
+            - 'checkbox "Dong overlay: mean_H" [checked] [ref=e853]'
+            - text: "Dong overlay: mean_H"
+          - generic [ref=e855]:
+            - 'checkbox "Dong metric heatmap: mean_H" [checked] [ref=e856]'
+            - text: "Dong metric heatmap: mean_H"
+          - generic [ref=e858]:
+            - checkbox "Bike station parking heatmap" [checked] [ref=e859]
+            - text: Bike station parking heatmap
+          - generic [ref=e861]:
+            - checkbox "Raw PM snapshot heatmap" [checked] [ref=e862]
+            - text: Raw PM snapshot heatmap
+    - generic:
+      - generic [ref=e863]:
+        - generic:
+          - generic:
+            - img
+        - link "Hide MiniMap" [ref=e866] [cursor=pointer]:
+          - /url: "#"
+      - generic [ref=e867]:
+        - link "Leaflet" [ref=e868] [cursor=pointer]:
+          - /url: https://leafletjs.com
+          - img [ref=e869]
+          - text: Leaflet
+        - text: "| ©"
+        - link "OpenStreetMap" [ref=e873] [cursor=pointer]:
+          - /url: https://www.openstreetmap.org/copyright
+        - text: contributors ©
+        - link "CARTO" [ref=e874] [cursor=pointer]:
+          - /url: https://carto.com/attributions
+        - text: ", ©"
+        - link "OpenStreetMap" [ref=e875] [cursor=pointer]:
+          - /url: https://www.openstreetmap.org/copyright
+        - text: contributors

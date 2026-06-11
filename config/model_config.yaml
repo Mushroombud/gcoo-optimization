@@ -52,13 +52,16 @@ data_input:
       rows_per_page: 1000
       max_pages: 10
     tago_pm:
-      # Set TAGO_PM_API_URL in .env or put the real shared-PM endpoint here.
-      # The OPEN_DATA_PORTAL_API_KEY value is injected as serviceKey automatically.
-      url: ""
-      params:
-        _type: json
-        pageNo: 1
-        numOfRows: 1000
+      base_url: http://apis.data.go.kr/1613000/PersonalMobilityInfo
+      provider_operation: GetPMProvider
+      list_operation: GetPMListByProvider
+      target_city_name: 서울
+      provider_lookup_city_name: ""
+      response_type: json
+      rows_per_page: 1000
+      max_provider_pages: 20
+      max_list_pages: 50
+      provider_name: ""
 
 model:
   inputs:

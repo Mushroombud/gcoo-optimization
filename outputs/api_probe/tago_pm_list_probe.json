@@ -1,0 +1,62 @@
+{
+  "response": {
+    "header": {
+      "resultCode": "00",
+      "resultMsg": "NORMAL SERVICE."
+    },
+    "body": {
+      "items": {
+        "item": [
+          {
+            "vehicleid": "425055",
+            "providername": "ALPACA",
+            "citycode": "12",
+            "cityname": "세종특별시",
+            "longitude": "127.34830500",
+            "latitude": "36.32547000",
+            "battery": "30"
+          },
+          {
+            "vehicleid": "425373",
+            "providername": "ALPACA",
+            "citycode": "12",
+            "cityname": "세종특별시",
+            "longitude": "127.33874000",
+            "latitude": "36.32649200",
+            "battery": "39"
+          },
+          {
+            "vehicleid": "425451",
+            "providername": "ALPACA",
+            "citycode": "12",
+            "cityname": "세종특별시",
+            "longitude": "127.33943000",
+            "latitude": "36.32762000",
+            "battery": "31"
+          },
+          {
+            "vehicleid": "424720",
+            "providername": "ALPACA",
+            "citycode": "12",
+            "cityname": "세종특별시",
+            "longitude": "127.34353000",
+            "latitude": "36.33012000",
+            "battery": "48"
+          },
+          {
+            "vehicleid": "425050",
+            "providername": "ALPACA",
+            "citycode": "12",
+            "cityname": "세종특별시",
+            "longitude": "127.34016400",
+            "latitude": "36.33057800",
+            "battery": "100"
+          }
+        ]
+      },
+      "numOfRows": 5,
+      "pageNo": 1,
+      "totalCount": 1368
+    }
+  }
+}

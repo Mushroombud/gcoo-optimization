@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import Any
 
@@ -21,7 +22,6 @@ from common import (
     now_kst_iso,
     now_kst_label,
     stable_hash,
-    write_json,
 )
 
 
@@ -160,6 +160,8 @@ def normalize_pm_records(rows: list[dict[str, Any]], snapshot_ts: str) -> tuple[
             [
                 "operator_name",
                 "operatorName",
+                "providerName",
+                "providername",
                 "oprtNm",
                 "companyName",
                 "업체명",
@@ -173,6 +175,8 @@ def normalize_pm_records(rows: list[dict[str, Any]], snapshot_ts: str) -> tuple[
             [
                 "device_id",
                 "deviceId",
+                "vehicleID",
+                "vehicleid",
                 "pmId",
                 "kickboardId",
                 "vhclId",
@@ -208,6 +212,8 @@ def normalize_pm_records(rows: list[dict[str, Any]], snapshot_ts: str) -> tuple[
                 "battery_level": to_float(battery_level),
                 "latitude": lat,
                 "longitude": lon,
+                "city_code": first_value(row, ["cityCode", "citycode"]),
+                "city_name": first_value(row, ["cityName", "cityname"]),
             }
         )
 
@@ -220,48 +226,243 @@ def normalize_pm_records(rows: list[dict[str, Any]], snapshot_ts: str) -> tuple[
     return pd.DataFrame.from_records(records), notes
 
 
+def tago_service_key() -> str:
+    service_key = env_first(["OPEN_DATA_PORTAL_API_KEY", "DATA_GO_KR_SERVICE_KEY"])
+    if not service_key:
+        raise RuntimeError("OPEN_DATA_PORTAL_API_KEY or DATA_GO_KR_SERVICE_KEY is required.")
+    return service_key
+
+
+def tago_operation_url(api_cfg: dict[str, Any], operation_key: str) -> str:
+    base_url = str(api_cfg["base_url"]).rstrip("/")
+    operation = str(api_cfg[operation_key]).strip("/")
+    return f"{base_url}/{operation}"
+
+
+def extract_xml_records(text: str) -> list[dict[str, Any]]:
+    root = ET.fromstring(text.encode("utf-8"))
+    records = []
+    for item in root.findall(".//item"):
+        row: dict[str, Any] = {}
+        for child in list(item):
+            tag = child.tag.split("}", 1)[-1]
+            row[tag] = child.text
+        records.append(row)
+    return records
+
+
+def extract_response_records(text: str, response_format: str) -> tuple[list[dict[str, Any]], list[str]]:
+    if response_format == "json":
+        payload = json.loads(text)
+        return extract_records(payload), flatten_field_paths(payload)
+    if response_format == "xml":
+        return extract_xml_records(text), []
+    return [], []
+
+
+def total_count_from_response(text: str, response_format: str, observed_count: int) -> int | None:
+    try:
+        if response_format == "json":
+            payload = json.loads(text)
+            value = payload.get("response", {}).get("body", {}).get("totalCount")
+            return int(value) if value is not None else None
+        if response_format == "xml":
+            root = ET.fromstring(text.encode("utf-8"))
+            value = root.findtext(".//totalCount")
+            return int(value) if value is not None else None
+    except (ValueError, ET.ParseError, json.JSONDecodeError):
+        return None
+    return observed_count if observed_count else None
+
+
+def fetch_tago_provider_page(
+    config: dict[str, Any],
+    page_no: int,
+    snapshot_label: str,
+) -> tuple[list[dict[str, Any]], int | None, dict[str, Any]]:
+    api_cfg = config["data_input"]["apis"]["tago_pm"]
+    service_key = tago_service_key()
+    raw_dir = ensure_dir(Path(config["data_input"]["paths"]["raw_api_dir"]) / "tago_pm")
+    params = {
+        "serviceKey": service_key,
+        "numOfRows": int(api_cfg.get("rows_per_page", 1000)),
+        "pageNo": page_no,
+        "_type": api_cfg.get("response_type", "json"),
+        "cityName": api_cfg.get("provider_lookup_city_name"),
+        "providerName": api_cfg.get("provider_name") or None,
+    }
+    result = http_get(tago_operation_url(api_cfg, "provider_operation"), params=params, secrets=[service_key])
+    response_format = detect_response_format(result.text)
+    raw_path = raw_dir / f"providers_{snapshot_label}_{page_no}.{response_format}"
+    raw_path.write_text(result.text, encoding="utf-8")
+    rows, field_paths = extract_response_records(result.text, response_format)
+    return rows, total_count_from_response(result.text, response_format, len(rows)), {
+        "redacted_url": result.redacted_url,
+        "raw_path": str(raw_path),
+        "response_format": response_format,
+        "field_paths": field_paths[:80],
+        "notes": result.notes,
+    }
+
+
+def city_matches_filter(city_name: Any, city_filter: Any) -> bool:
+    if not city_filter:
+        return True
+    if not city_name:
+        return False
+    actual = str(city_name).strip()
+    expected = str(city_filter).strip()
+    return expected in actual or actual in expected
+
+
+def normalize_tago_providers(rows: list[dict[str, Any]]) -> pd.DataFrame:
+    records = []
+    seen = set()
+    for row in rows:
+        provider_name = first_value(row, ["providerName", "providername"])
+        city_code = first_value(row, ["cityCode", "citycode"])
+        city_name = first_value(row, ["cityName", "cityname"])
+        if not provider_name or not city_code:
+            continue
+        key = (str(provider_name), str(city_code))
+        if key in seen:
+            continue
+        seen.add(key)
+        records.append(
+            {
+                "provider_name": provider_name,
+                "city_code": city_code,
+                "city_name": city_name,
+            }
+        )
+    columns = ["provider_name", "city_code", "city_name"]
+    return pd.DataFrame.from_records(records, columns=columns)
+
+
+def fetch_tago_providers(
+    config: dict[str, Any],
+    snapshot_label: str,
+) -> tuple[pd.DataFrame, pd.DataFrame, list[dict[str, Any]]]:
+    api_cfg = config["data_input"]["apis"]["tago_pm"]
+    rows_per_page = int(api_cfg.get("rows_per_page", 1000))
+    max_pages = int(api_cfg.get("max_provider_pages", 20))
+    all_rows: list[dict[str, Any]] = []
+    page_events: list[dict[str, Any]] = []
+    for page_no in range(1, max_pages + 1):
+        rows, total_count, event = fetch_tago_provider_page(config, page_no, snapshot_label)
+        page_events.append(event)
+        all_rows.extend(rows)
+        if not rows or len(rows) < rows_per_page:
+            break
+        if total_count is not None and len(all_rows) >= total_count:
+            break
+
+    all_providers = normalize_tago_providers(all_rows)
+    raw_dir = Path(config["data_input"]["paths"]["raw_api_dir"]) / "tago_pm"
+    all_providers_path = raw_dir / f"providers_all_{snapshot_label}.csv"
+    ensure_dir(all_providers_path.parent)
+    all_providers.to_csv(all_providers_path, index=False)
+
+    target_city_name = api_cfg.get("target_city_name") or api_cfg.get("city_name")
+    if target_city_name and not all_providers.empty:
+        providers = all_providers[
+            all_providers["city_name"].map(lambda city_name: city_matches_filter(city_name, target_city_name))
+        ].copy()
+    else:
+        providers = all_providers
+
+    providers_path = raw_dir / f"providers_{snapshot_label}.csv"
+    ensure_dir(providers_path.parent)
+    providers.to_csv(providers_path, index=False)
+    return providers, all_providers, page_events
+
+
+def fetch_tago_pm_list_page(
+    config: dict[str, Any],
+    provider_name: str,
+    city_code: str,
+    page_no: int,
+    snapshot_label: str,
+) -> tuple[list[dict[str, Any]], int | None, dict[str, Any]]:
+    api_cfg = config["data_input"]["apis"]["tago_pm"]
+    service_key = tago_service_key()
+    raw_dir = ensure_dir(Path(config["data_input"]["paths"]["raw_api_dir"]) / "tago_pm")
+    params = {
+        "serviceKey": service_key,
+        "numOfRows": int(api_cfg.get("rows_per_page", 1000)),
+        "pageNo": page_no,
+        "_type": api_cfg.get("response_type", "json"),
+        "providerName": provider_name,
+        "cityCode": city_code,
+    }
+    result = http_get(tago_operation_url(api_cfg, "list_operation"), params=params, secrets=[service_key])
+    response_format = detect_response_format(result.text)
+    safe_provider = "".join(ch if ch.isalnum() else "_" for ch in provider_name)[:60]
+    raw_path = raw_dir / f"pm_list_{snapshot_label}_{city_code}_{safe_provider}_{page_no}.{response_format}"
+    raw_path.write_text(result.text, encoding="utf-8")
+    rows, field_paths = extract_response_records(result.text, response_format)
+    return rows, total_count_from_response(result.text, response_format, len(rows)), {
+        "provider_name": provider_name,
+        "city_code": city_code,
+        "redacted_url": result.redacted_url,
+        "raw_path": str(raw_path),
+        "response_format": response_format,
+        "field_paths": field_paths[:80],
+        "notes": result.notes,
+    }
+
+
 def fetch_tago_pm_snapshot(config: dict[str, Any], snapshot_label: str) -> pd.DataFrame:
     api_cfg = config["data_input"]["apis"]["tago_pm"]
-    url = env_first(["TAGO_PM_API_URL"], api_cfg.get("url") or None)
-    service_key = env_first(["OPEN_DATA_PORTAL_API_KEY", "DATA_GO_KR_SERVICE_KEY"])
-    raw_dir = ensure_dir(Path(config["data_input"]["paths"]["raw_api_dir"]) / "tago_pm")
-
-    if not url:
+    rows_per_page = int(api_cfg.get("rows_per_page", 1000))
+    max_pages = int(api_cfg.get("max_list_pages", 50))
+    notes: list[str] = []
+    providers, all_providers, provider_events = fetch_tago_providers(config, snapshot_label)
+    target_city_name = api_cfg.get("target_city_name") or api_cfg.get("city_name")
+    if providers.empty:
+        returned_cities = []
+        if not all_providers.empty:
+            returned_cities = sorted(all_providers["city_name"].dropna().astype(str).unique().tolist())
         record_manifest(
             config,
             {
                 "source": "tago_pm",
                 "ok": False,
                 "snapshot_label": snapshot_label,
+                "all_provider_rows": len(all_providers),
+                "target_city_name": target_city_name,
+                "returned_cities": returned_cities,
                 "notes": [
-                    "TAGO_PM_API_URL is not configured. "
-                    "Set the real shared-PM endpoint to start accumulating device snapshots."
+                    "No TAGO PM providers matched the configured target city after all-city provider lookup."
                 ],
+                "provider_events": provider_events,
             },
         )
         return pd.DataFrame()
-    if not service_key:
-        raise RuntimeError("OPEN_DATA_PORTAL_API_KEY or DATA_GO_KR_SERVICE_KEY is required.")
 
-    params = dict(api_cfg.get("params") or {})
-    if "serviceKey" not in params and "serviceKey=" not in url:
-        params["serviceKey"] = service_key
-    result = http_get(url, params=params, secrets=[service_key])
-    response_format = detect_response_format(result.text)
-    raw_path = raw_dir / f"tago_pm_{snapshot_label}.{response_format}"
-    raw_path.write_text(result.text, encoding="utf-8")
+    all_rows: list[dict[str, Any]] = []
+    list_events: list[dict[str, Any]] = []
+    for provider in providers.to_dict("records"):
+        provider_name = str(provider["provider_name"])
+        city_code = str(provider["city_code"])
+        provider_rows: list[dict[str, Any]] = []
+        for page_no in range(1, max_pages + 1):
+            rows, total_count, event = fetch_tago_pm_list_page(
+                config,
+                provider_name,
+                city_code,
+                page_no,
+                snapshot_label,
+            )
+            list_events.append(event)
+            provider_rows.extend(rows)
+            if not rows or len(rows) < rows_per_page:
+                break
+            if total_count is not None and len(provider_rows) >= total_count:
+                break
+        all_rows.extend(provider_rows)
 
-    rows: list[dict[str, Any]] = []
-    field_paths: list[str] = []
-    notes = list(result.notes)
-    if response_format == "json":
-        payload = json.loads(result.text)
-        rows = extract_records(payload)
-        field_paths = flatten_field_paths(payload)
-    else:
-        notes.append(f"Expected JSON from TAGO PM endpoint, got {response_format}.")
-
-    snapshot_df, normalize_notes = normalize_pm_records(rows, now_kst_iso())
+    snapshot_df, normalize_notes = normalize_pm_records(all_rows, now_kst_iso())
     notes.extend(normalize_notes)
     normalized_path: str | None = None
     if not snapshot_df.empty:
@@ -276,12 +477,15 @@ def fetch_tago_pm_snapshot(config: dict[str, Any], snapshot_label: str) -> pd.Da
             "source": "tago_pm",
             "ok": not snapshot_df.empty,
             "rows": len(snapshot_df),
-            "raw_rows": len(rows),
-            "redacted_url": result.redacted_url,
-            "raw_path": str(raw_path),
+            "raw_rows": len(all_rows),
+            "provider_rows": len(providers),
+            "all_provider_rows": len(all_providers),
+            "target_city_name": target_city_name,
             "normalized_path": normalized_path,
             "snapshot_label": snapshot_label,
-            "field_paths": field_paths[:80],
+            "provider_events": provider_events,
+            "list_event_count": len(list_events),
+            "list_events_sample": list_events[:20],
             "notes": notes,
         },
     )

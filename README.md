@@ -45,29 +45,29 @@ It does not provide trip history. The spec needs rental timestamp, return timest
 
 ### TAGO / data.go.kr
 
-The official TAGO website describes a public transport integrated information service and exposes Open API application flow. The currently visible TAGO categories are public transport modes, not shared PM device snapshots.
-
-A known TAGO public-data gateway endpoint was probed without a service key:
+The bundled Word guide `오픈API활용가이드_국토교통부(TAGO)_퍼스널모빌리티정보v1.1.docx` documents the actual PM API:
 
 ```text
-http://apis.data.go.kr/1613000/BusSttnInfoInqireService/getCrdntPrxmtSttnList
+Service: http://apis.data.go.kr/1613000/PersonalMobilityInfo
+Provider list: /GetPMProvider
+PM list: /GetPMListByProvider
 ```
 
-Observed unauthenticated response:
+Confirmed response fields from the guide and live probe:
 
 ```text
-Unauthorized
+providerName, vehicleID, battery, cityCode, cityName, latitude, longitude
 ```
 
-This confirms the data.go.kr/TAGO gateway requires a service key. It does not confirm that the spec-required shared PM fields are publicly available.
-
-The spec-required TAGO PM data requires per-device or per-snapshot fields:
+The implemented flow is:
 
 ```text
-timestamp, operator_name, device_id, battery_level, latitude, longitude
+GetPMProvider with cityName omitted -> all providerName/cityCode pairs
+Filter provider rows where cityName matches target_city_name=서울
+GetPMListByProvider(providerName, cityCode) -> live rideable PM devices
 ```
 
-At this point, the public TAGO page and unauthenticated gateway probe do not expose a verified API that returns those fields. If the actual shared PM endpoint exists behind data.go.kr authorization, we need the subscribed API URL and a `DATA_GO_KR_SERVICE_KEY` to validate it.
+Current live behavior: even with `cityName` omitted as the guide specifies for all-city lookup, the API currently returns only `세종특별시` providers (`ALPACA`, `GBIKE`). The data input code writes both the all-provider CSV and the target-city provider CSV, then only calls PM list endpoints for providers whose `cityName` matches Seoul. As of the latest run, TAGO API works, but no Seoul PM provider row is exposed by this endpoint.
 
 ## Data Feasibility Against `Spec.md`
 
@@ -76,7 +76,7 @@ At this point, the public TAGO page and unauthenticated gateway probe do not exp
 | Seoul administrative dong boundaries | Possible via separate boundary dataset, not TAGO/bikeList | Need `data/raw/seoul_admin_dong.geojson` or a confirmed boundary API |
 | Seoul Bike station coordinates | API-solvable | Confirmed via Seoul `bikeList` |
 | Seoul Bike rental history | Not solved by `bikeList` | Need historical trip CSV/file API |
-| TAGO shared PM device snapshots | Unconfirmed | Need real PM endpoint + data.go.kr service key |
+| TAGO shared PM device snapshots | API-solvable where city data is exposed | `PersonalMobilityInfo` works; all-city provider lookup currently exposes Sejong, not Seoul |
 | GCOO pricing/cost | Not public API data | Config assumptions |
 
 ## Required Keys
@@ -95,13 +95,7 @@ SEOUL_OPEN_API_KEY="..."
 DATA_GO_KR_SERVICE_KEY="..."
 ```
 
-To start accumulating real shared-PM snapshots, also provide the actual TAGO/shared-PM endpoint:
-
-```bash
-TAGO_PM_API_URL="https://..."
-```
-
-`OPEN_DATA_PORTAL_API_KEY` is injected as `serviceKey` automatically.
+`OPEN_DATA_PORTAL_API_KEY` is injected as `serviceKey` automatically for TAGO `PersonalMobilityInfo`.
 
 ## Data Input Part
 
@@ -116,7 +110,9 @@ This writes:
 ```text
 data/raw/seoul_bike_stations.csv
 data/raw/seoul_private_pm_operator_summary.csv
-data/raw/tago_pm_snapshots_<label>.csv    # only when TAGO_PM_API_URL is configured
+data/raw/api/tago_pm/providers_all_<label>.csv
+data/raw/api/tago_pm/providers_<label>.csv
+data/raw/tago_pm_snapshots_<label>.csv    # only when TAGO returns providers matching target_city_name
 data/raw/api/
 data/raw/snapshot_manifest.jsonl
 ```
@@ -127,7 +123,7 @@ For the next week, run the same command repeatedly near the target decision wind
 python3 src/data_input.py --snapshot-label "$(date +%Y%m%dT%H%M%S)"
 ```
 
-Each successful TAGO call appends one normalized PM snapshot file. As files accumulate, the model gets better estimates for:
+Each successful TAGO call appends one normalized PM snapshot file after city validation. As files accumulate, the model gets better estimates for:
 
 - `x_obs_i`: average observed GCOO placement
 - `competitor_count_is`: competitor density by scenario day
@@ -142,7 +138,7 @@ The model layer does not call external APIs. It reads accumulated files from `da
 python3 src/model.py --out outputs/model
 ```
 
-If no real TAGO PM snapshot file exists yet, the model writes a readiness report instead of pretending the data exists:
+If no real Seoul-matching TAGO PM snapshot file exists yet, the model writes a readiness report instead of pretending the data exists:
 
 ```text
 outputs/model/model_readiness.json
@@ -158,6 +154,59 @@ Combined one-shot command:
 
 ```bash
 python3 src/run_pipeline.py --snapshot-label now --out outputs/latest_run
+```
+
+## Visualization Setup
+
+Visualization is split into two interactive HTML outputs:
+
+1. numeric charts from optimization/scenario CSVs,
+2. Seoul map visualizations with dong overlays, heatmaps, and bike station markers.
+
+The setup uses Python packages instead of adding a React app:
+
+- `pyecharts`: Python wrapper for Apache ECharts, used for interactive chart dashboards.
+- `folium`: Python wrapper for Leaflet, used for Seoul map overlay and heatmap HTML.
+
+Install dependencies:
+
+```bash
+python3 -m pip install -r requirements.txt
+```
+
+Generate fixture-backed prototype outputs and then render both visualization surfaces:
+
+```bash
+python3 src/prototype_pipeline.py --out outputs/prototype
+python3 src/visualize.py --input outputs/prototype --out outputs/visualizations
+```
+
+Generated files:
+
+```text
+outputs/visualizations/charts_dashboard.html
+outputs/visualizations/seoul_map.html
+outputs/visualizations/visualization_manifest.json
+```
+
+For real Seoul administrative dong boundaries, place a GeoJSON at:
+
+```text
+data/raw/seoul_admin_dong.geojson
+```
+
+You can generate it from the bundled downloader:
+
+```bash
+python3 src/fetch_seoul_boundary.py --out data/raw/seoul_admin_dong.geojson
+```
+
+The visualizer will use that file automatically. Until it exists, `seoul_map.html` uses the current fixture dong bounding boxes from `src/prototype_pipeline.py`, so map generation still works for smoke testing. The map metric defaults to `auto`; override it when needed:
+
+```bash
+python3 src/visualize.py --input outputs/model --map-metric x_star_i
+python3 src/visualize.py --input outputs/model --map-metric mean_H
+python3 src/visualize.py --input outputs/model --map-metric mean_competitor_count
 ```
 
 ## Run
@@ -189,4 +238,4 @@ outputs/prototype/allocation_optimized.csv
 outputs/prototype/prototype_report.md
 ```
 
-The prototype uses a tiny fixture for TAGO PM snapshots because the real shared PM API is not verified yet. That fixture is isolated in `src/prototype_pipeline.py` and should be replaced by `data/raw/tago_pm_snapshots_*.csv` once the real API is available.
+The prototype uses a tiny fixture for smoke testing. The real pipeline uses `src/data_input.py` and city-validated `data/raw/tago_pm_snapshots_*.csv`.

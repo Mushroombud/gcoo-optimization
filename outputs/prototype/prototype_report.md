@@ -6,11 +6,11 @@ This is a tiny end-to-end prototype, not a final analysis run.
 
 - PM-like fixture trips retained: 4
 - Demand scenario rows: 4
-- TAGO-like scenario rows: 4
+- TAGO-like scenario rows: 0
 
 ## Allocation
 
-- Total supply used: 2
+- Total supply used: 6
 - Active dongs: 0
 
 Top allocated dongs:

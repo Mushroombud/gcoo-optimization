@@ -1,0 +1,70 @@
+{
+  "input_dir": "outputs/prototype",
+  "charts_dashboard": "outputs/visualizations/charts_dashboard.html",
+  "seoul_map": "outputs/visualizations/seoul_map.html",
+  "selected_map_metric": "mean_H",
+  "boundary_source": "geojson",
+  "tables": {
+    "dong_master": {
+      "rows": 3,
+      "columns": [
+        "dong_id",
+        "dong_name",
+        "gu_name",
+        "area_km2"
+      ]
+    },
+    "model_inputs": {
+      "rows": 3,
+      "columns": [
+        "dong_id",
+        "p_i",
+        "c_i",
+        "K_i",
+        "x_obs_i",
+        "B_i"
+      ]
+    },
+    "allocation": {
+      "rows": 3,
+      "columns": [
+        "dong_id",
+        "x_star_i",
+        "total_supply_F"
+      ]
+    },
+    "demand": {
+      "rows": 4,
+      "columns": [
+        "scenario_day",
+        "dong_id",
+        "H_is",
+        "departures_is",
+        "avg_distance_km_i",
+        "arrivals_is"
+      ]
+    },
+    "tago": {
+      "rows": 0,
+      "columns": [
+        "scenario_day",
+        "dong_id",
+        "gcoo_count_is",
+        "competitor_count_is",
+        "total_pm_count_is"
+      ]
+    },
+    "bike_stations": {
+      "rows": 5,
+      "columns": [
+        "station_id",
+        "station_name",
+        "latitude",
+        "longitude",
+        "parking_bike_count",
+        "rack_count",
+        "dong_id"
+      ]
+    }
+  }
+}

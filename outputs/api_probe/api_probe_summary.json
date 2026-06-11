@@ -2,7 +2,7 @@
   {
     "name": "seoul_bike_realtime_station",
     "url": "http://openapi.seoul.go.kr:8088/***/json/bikeList/1/5/",
-    "status_code": null,
+    "status_code": 200,
     "response_format": "json",
     "ok": true,
     "field_paths": [
@@ -18,30 +18,35 @@
       "rentBikeStatus.row[].stationId"
     ],
     "notes": [
-      "requests failed: HTTPConnectionPool(host='openapi.seoul.go.kr', port=8088): Max retries exceeded with url: /sample/json/bikeList/1/5/ (Caused by NameResolutionError(\"HTTPConnection(host='openapi.seoul.go.kr', port=8088): Failed to resolve 'openapi.seoul.go.kr' ([Errno 8] nodename nor servname provided, or not known)\"))",
-      "curl fallback exited with code 6: ",
-      "Used cached raw API response from seoul_bike_sample.json.",
       "Rows returned: 5",
       "Usable for station_id, station_name, latitude, longitude."
     ],
     "raw_file": "outputs/api_probe/seoul_bike_sample.json"
   },
   {
-    "name": "tago_data_go_kr_gateway",
-    "url": "http://apis.data.go.kr/1613000/BusSttnInfoInqireService/getCrdntPrxmtSttnList?gpsLati=37.5665&gpsLong=126.9780&numOfRows=5&pageNo=1&_type=json",
-    "status_code": null,
-    "response_format": "text",
-    "ok": false,
-    "field_paths": [],
-    "notes": [
-      "This probes a known TAGO/data.go.kr gateway shape, not a shared PM endpoint.",
-      "The spec-required shared PM endpoint is still unverified.",
-      "DATA_GO_KR_SERVICE_KEY is not set; unauthenticated calls are expected to fail.",
-      "requests failed: HTTPConnectionPool(host='apis.data.go.kr', port=80): Max retries exceeded with url: /1613000/BusSttnInfoInqireService/getCrdntPrxmtSttnList?gpsLati=37.5665&gpsLong=126.9780&numOfRows=5&pageNo=1&_type=json (Caused by NameResolutionError(\"HTTPConnection(host='apis.data.go.kr', port=80): Failed to resolve 'apis.data.go.kr' ([Errno 8] nodename nor servname provided, or not known)\"))",
-      "curl fallback exited with code 6: ",
-      "Used cached raw API response from tago_gateway_probe.txt.",
-      "Raw response body starts with: 'Unauthorized\\n'"
+    "name": "tago_personal_mobility",
+    "url": "http://apis.data.go.kr/1613000/PersonalMobilityInfo/GetPMProvider?numOfRows=1000&pageNo=1&_type=json&serviceKey=***",
+    "status_code": 200,
+    "response_format": "json",
+    "ok": true,
+    "field_paths": [
+      "response.header.resultCode",
+      "response.header.resultMsg",
+      "response.body.items.item[].citycode",
+      "response.body.items.item[].cityname",
+      "response.body.items.item[].providername",
+      "response.body.numOfRows",
+      "response.body.pageNo",
+      "response.body.totalCount"
     ],
-    "raw_file": "outputs/api_probe/tago_gateway_probe.txt"
+    "notes": [
+      "This probes TAGO PersonalMobilityInfo/GetPMProvider from the official guide.",
+      "Provider rows returned: 2",
+      "Provider cities returned: 세종특별시",
+      "Target city provider rows for 서울: 0",
+      "Selected provider from API: 세종특별시/12 ALPACA",
+      "No 서울 provider was found in the all-city provider response."
+    ],
+    "raw_file": "outputs/api_probe/tago_pm_provider_probe.json"
   }
 ]

@@ -11,12 +11,12 @@ from urllib.parse import urlencode
 
 import requests
 
+from common import load_dotenv
+
 
 SEOUL_BIKE_URL_TEMPLATE = "http://openapi.seoul.go.kr:8088/{key}/json/bikeList/1/5/"
-TAGO_BUS_STOP_URL = (
-    "http://apis.data.go.kr/1613000/BusSttnInfoInqireService/"
-    "getCrdntPrxmtSttnList"
-)
+TAGO_PM_PROVIDER_URL = "http://apis.data.go.kr/1613000/PersonalMobilityInfo/GetPMProvider"
+TAGO_PM_LIST_URL = "http://apis.data.go.kr/1613000/PersonalMobilityInfo/GetPMListByProvider"
 
 
 @dataclass
@@ -50,13 +50,14 @@ def detect_response_format(text: str) -> str:
     return "text"
 
 
-def http_get(url: str) -> tuple[int | None, str, list[str]]:
+def http_get(url: str, secret_values: list[str] | None = None) -> tuple[int | None, str, list[str]]:
+    secrets = secret_values or []
     notes: list[str] = []
     try:
         response = requests.get(url, timeout=20)
         return response.status_code, response.text, notes
     except requests.RequestException as exc:
-        notes.append(f"requests failed: {exc}")
+        notes.append(f"requests failed: {redact_url(str(exc), secrets)}")
 
     curl_cmd = [
         "curl",
@@ -121,12 +122,29 @@ def write_json(path: Path, value: Any) -> None:
     path.write_text(json.dumps(value, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
+def response_items(payload: dict[str, Any]) -> list[dict[str, Any]]:
+    items = payload.get("response", {}).get("body", {}).get("items", {}).get("item", [])
+    if isinstance(items, dict):
+        return [items]
+    if isinstance(items, list):
+        return [item for item in items if isinstance(item, dict)]
+    return []
+
+
+def city_matches(city_name: Any, target_city: str) -> bool:
+    if not city_name:
+        return False
+    actual = str(city_name).strip()
+    target = target_city.strip()
+    return target in actual or actual in target
+
+
 def probe_seoul_bike(out_dir: Path) -> ProbeResult:
-    api_key = os.getenv("SEOUL_OPEN_API_KEY", "sample")
+    api_key = os.getenv("SEOUL_API_KEY") or os.getenv("SEOUL_OPEN_API_KEY") or "sample"
     url = SEOUL_BIKE_URL_TEMPLATE.format(key=api_key)
     notes: list[str] = []
 
-    status_code, text, transport_notes = http_get(url)
+    status_code, text, transport_notes = http_get(url, [api_key])
     notes.extend(transport_notes)
     cached_json_path = out_dir / "seoul_bike_sample.json"
     if not text.strip() and cached_json_path.exists():
@@ -180,29 +198,23 @@ def probe_seoul_bike(out_dir: Path) -> ProbeResult:
     )
 
 
-def probe_tago_gateway(out_dir: Path) -> ProbeResult:
-    service_key = os.getenv("DATA_GO_KR_SERVICE_KEY")
-    params = {
-        "gpsLati": "37.5665",
-        "gpsLong": "126.9780",
-        "numOfRows": "5",
-        "pageNo": "1",
-        "_type": "json",
-    }
+def probe_tago_personal_mobility(out_dir: Path) -> ProbeResult:
+    service_key = os.getenv("OPEN_DATA_PORTAL_API_KEY") or os.getenv("DATA_GO_KR_SERVICE_KEY")
+    target_city = "서울"
+    provider_params = {"numOfRows": "1000", "pageNo": "1", "_type": "json"}
     notes = [
-        "This probes a known TAGO/data.go.kr gateway shape, not a shared PM endpoint.",
-        "The spec-required shared PM endpoint is still unverified.",
+        "This probes TAGO PersonalMobilityInfo/GetPMProvider from the official guide.",
     ]
     if service_key:
-        params["serviceKey"] = service_key
+        provider_params["serviceKey"] = service_key
     else:
-        notes.append("DATA_GO_KR_SERVICE_KEY is not set; unauthenticated calls are expected to fail.")
+        notes.append("OPEN_DATA_PORTAL_API_KEY or DATA_GO_KR_SERVICE_KEY is not set.")
 
-    query = urlencode(params)
-    url = f"{TAGO_BUS_STOP_URL}?{query}"
+    query = urlencode(provider_params)
+    url = f"{TAGO_PM_PROVIDER_URL}?{query}"
     redacted_url = redact_url(url, [service_key or ""])
 
-    status_code, text, transport_notes = http_get(url)
+    status_code, text, transport_notes = http_get(url, [service_key or ""])
     notes.extend(transport_notes)
     cached_text_path = out_dir / "tago_gateway_probe.txt"
     if not text.strip() and cached_text_path.exists():
@@ -212,7 +224,7 @@ def probe_tago_gateway(out_dir: Path) -> ProbeResult:
         notes.append("Used cached raw API response from tago_gateway_probe.txt.")
     if status_code is None and not text:
         return ProbeResult(
-            name="tago_data_go_kr_gateway",
+            name="tago_personal_mobility",
             url=redacted_url,
             status_code=None,
             response_format="request_error",
@@ -223,7 +235,7 @@ def probe_tago_gateway(out_dir: Path) -> ProbeResult:
 
     response_format = detect_response_format(text)
     raw_path = out_dir / (
-        "tago_gateway_probe.json" if response_format == "json" else "tago_gateway_probe.txt"
+        "tago_pm_provider_probe.json" if response_format == "json" else "tago_pm_provider_probe.txt"
     )
     field_paths: list[str] = []
     ok = False
@@ -232,14 +244,56 @@ def probe_tago_gateway(out_dir: Path) -> ProbeResult:
         payload = json.loads(text)
         write_json(raw_path, payload)
         field_paths = flatten_field_paths(payload)
-        ok = "response" in payload
-        notes.append("Authenticated TAGO-like JSON response received.")
+        providers = response_items(payload)
+        notes.append(f"Provider rows returned: {len(providers)}")
+        if providers:
+            cities = sorted({str(row.get("cityname") or row.get("cityName")) for row in providers})
+            notes.append(f"Provider cities returned: {', '.join(cities[:20])}")
+            target_providers = [
+                row for row in providers if city_matches(row.get("cityname") or row.get("cityName"), target_city)
+            ]
+            notes.append(f"Target city provider rows for {target_city}: {len(target_providers)}")
+            first = target_providers[0] if target_providers else providers[0]
+            notes.append(
+                f"Selected provider from API: {first.get('cityname')}/{first.get('citycode')} {first.get('typename') or first.get('providerName') or first.get('providername')}"
+            )
+            if service_key and target_providers:
+                list_params = {
+                    "serviceKey": service_key,
+                    "providerName": first.get("kprovidername") or first.get("providerName") or first.get("providername"),
+                    "cityCode": first.get("citycode") or first.get("cityCode"),
+                    "numOfRows": "5",
+                    "pageNo": "1",
+                    "_type": "json",
+                }
+                list_url = f"{TAGO_PM_LIST_URL}?{urlencode(list_params)}"
+                list_status, list_text, list_notes = http_get(list_url, [service_key])
+                notes.extend(list_notes)
+                list_format = detect_response_format(list_text)
+                list_raw_path = out_dir / (
+                    "tago_pm_list_probe.json" if list_format == "json" else "tago_pm_list_probe.txt"
+                )
+                if list_format == "json":
+                    list_payload = json.loads(list_text)
+                    write_json(list_raw_path, list_payload)
+                    list_rows = response_items(list_payload)
+                    notes.append(f"PM list rows returned for first provider: {len(list_rows)}")
+                    field_paths.extend(flatten_field_paths(list_payload)[:80])
+                    ok = list_status == 200 and len(list_rows) > 0
+                else:
+                    write_text(list_raw_path, list_text)
+                    notes.append(f"PM list response was {list_format}, status={list_status}.")
+            elif providers:
+                ok = status_code == 200
+                notes.append(f"No {target_city} provider was found in the all-city provider response.")
+            else:
+                ok = False
     else:
         write_text(raw_path, text)
         notes.append(f"Raw response body starts with: {text[:80]!r}")
 
     return ProbeResult(
-        name="tago_data_go_kr_gateway",
+        name="tago_personal_mobility",
         url=redacted_url,
         status_code=status_code,
         response_format=response_format,
@@ -283,8 +337,8 @@ def build_findings(results: list[ProbeResult]) -> str:
             "",
             "- Seoul Bike station coordinates are API-solvable through `bikeList`.",
             "- Seoul Bike trip history is not returned by `bikeList`; historical rental files are still required.",
-            "- TAGO/data.go.kr requires `DATA_GO_KR_SERVICE_KEY` for usable responses.",
-            "- A TAGO shared PM per-device snapshot endpoint was not verified from public unauthenticated sources.",
+            "- TAGO PersonalMobilityInfo can provide provider, vehicleID, battery, latitude, and longitude fields.",
+            "- The current provider API response must still be checked against the configured target city before using it for Seoul modeling.",
         ]
     )
     return "\n".join(lines)
@@ -293,14 +347,16 @@ def build_findings(results: list[ProbeResult]) -> str:
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--out", default="outputs/api_probe")
+    parser.add_argument("--env", default=".env")
     args = parser.parse_args()
+    load_dotenv(args.env)
 
     out_dir = Path(args.out)
     out_dir.mkdir(parents=True, exist_ok=True)
 
     results = [
         probe_seoul_bike(out_dir),
-        probe_tago_gateway(out_dir),
+        probe_tago_personal_mobility(out_dir),
     ]
 
     write_json(out_dir / "api_probe_summary.json", [asdict(result) for result in results])
