@@ -134,7 +134,7 @@ def format_dong_label(row: pd.Series) -> str:
 
 
 def choose_map_metric(metrics: pd.DataFrame, requested: str) -> str:
-    if requested != "auto" and requested in metrics.columns:
+    if requested != "auto":
         return requested
 
     for candidate in [
@@ -419,6 +419,116 @@ def attach_metric_properties(
         )
         properties["_gcoo_source"] = properties.get("source", "geojson")
     return geojson
+
+
+def point_in_ring(lon: float, lat: float, ring: list[list[float]]) -> bool:
+    inside = False
+    if len(ring) < 3:
+        return inside
+
+    j = len(ring) - 1
+    for i, point in enumerate(ring):
+        xi, yi = float(point[0]), float(point[1])
+        xj, yj = float(ring[j][0]), float(ring[j][1])
+        crosses = (yi > lat) != (yj > lat)
+        if crosses:
+            x_intersection = (xj - xi) * (lat - yi) / (yj - yi) + xi
+            if lon < x_intersection:
+                inside = not inside
+        j = i
+    return inside
+
+
+def point_in_polygon(lon: float, lat: float, polygon: list[list[list[float]]]) -> bool:
+    if not polygon or not point_in_ring(lon, lat, polygon[0]):
+        return False
+    return not any(point_in_ring(lon, lat, hole) for hole in polygon[1:])
+
+
+def geometry_contains_point(geometry: dict[str, Any], lon: float, lat: float) -> bool:
+    geometry_type = geometry.get("type")
+    coordinates = geometry.get("coordinates", [])
+    if geometry_type == "Polygon":
+        return point_in_polygon(lon, lat, coordinates)
+    if geometry_type == "MultiPolygon":
+        return any(point_in_polygon(lon, lat, polygon) for polygon in coordinates)
+    return False
+
+
+def build_raw_pm_boundary_metrics(
+    geojson: dict[str, Any],
+    tago_points: pd.DataFrame,
+) -> pd.DataFrame:
+    if tago_points.empty or not {"latitude", "longitude"}.issubset(tago_points.columns):
+        return pd.DataFrame()
+
+    rows = []
+    for feature in geojson.get("features", []):
+        properties = feature.get("properties", {})
+        rows.append(
+            {
+                "feature": feature,
+                "dong_id": str(properties.get("dong_id") or properties.get("adm_cd") or ""),
+                "dong_name": str(properties.get("dong_name") or properties.get("adm_nm") or ""),
+                "gu_name": str(properties.get("gu_name") or properties.get("sggnm") or ""),
+                "raw_pm_count": 0,
+                "raw_pm_mean_battery": 0.0,
+                "_battery_sum": 0.0,
+                "_battery_count": 0,
+            }
+        )
+
+    for point in tago_points.dropna(subset=["latitude", "longitude"]).to_dict("records"):
+        lat = float(point["latitude"])
+        lon = float(point["longitude"])
+        battery = pd.to_numeric(point.get("battery_level"), errors="coerce")
+        for row in rows:
+            if geometry_contains_point(row["feature"].get("geometry", {}), lon, lat):
+                row["raw_pm_count"] += 1
+                if pd.notna(battery):
+                    row["_battery_sum"] += float(battery)
+                    row["_battery_count"] += 1
+                break
+
+    records = []
+    for row in rows:
+        mean_battery = (
+            row["_battery_sum"] / row["_battery_count"]
+            if row["_battery_count"]
+            else 0.0
+        )
+        records.append(
+            {
+                "dong_id": row["dong_id"],
+                "dong_name": row["dong_name"],
+                "gu_name": row["gu_name"],
+                "raw_pm_count": row["raw_pm_count"],
+                "raw_pm_mean_battery": round(mean_battery, 2),
+            }
+        )
+    return pd.DataFrame.from_records(records)
+
+
+def merge_metric_frame(metrics: pd.DataFrame, extra: pd.DataFrame) -> pd.DataFrame:
+    if extra.empty:
+        return metrics
+    if metrics.empty or "dong_id" not in metrics.columns:
+        merged = extra.copy()
+    else:
+        merged = metrics.merge(extra, on="dong_id", how="outer", suffixes=("", "_extra"))
+        for column in ["dong_name", "gu_name"]:
+            extra_column = f"{column}_extra"
+            if extra_column in merged.columns:
+                merged[column] = merged[column].fillna(merged[extra_column])
+                merged = merged.drop(columns=[extra_column])
+
+    numeric_cols = merged.select_dtypes(include="number").columns
+    merged[numeric_cols] = merged[numeric_cols].fillna(0)
+    if "label" not in merged.columns:
+        merged["label"] = merged.apply(format_dong_label, axis=1)
+    else:
+        merged["label"] = merged["label"].fillna(merged.apply(format_dong_label, axis=1))
+    return merged
 
 
 def iter_coordinate_pairs(geometry: dict[str, Any]) -> list[tuple[float, float]]:
@@ -809,16 +919,25 @@ def render_map(
     out_path: Path,
     metric: str,
     tago_glob: str,
+    zoom_start: int,
 ) -> str:
-    geojson = attach_metric_properties(load_geojson(geojson_path), metrics, metric)
-    m = folium.Map(location=map_center(tables, geojson), zoom_start=13, tiles=None)
+    geojson = load_geojson(geojson_path)
+    tago_points = load_tago_points(tago_glob)
+    if metric in {"raw_pm_count", "raw_pm_mean_battery"}:
+        metrics = merge_metric_frame(
+            metrics,
+            build_raw_pm_boundary_metrics(geojson, tago_points),
+        )
+
+    geojson = attach_metric_properties(geojson, metrics, metric)
+    m = folium.Map(location=map_center(tables, geojson), zoom_start=zoom_start, tiles=None)
     folium.TileLayer("CartoDB positron", name="CartoDB positron").add_to(m)
     folium.TileLayer("OpenStreetMap", name="OpenStreetMap").add_to(m)
 
     dong_layer_name = add_dong_overlay(m, geojson, metric)
     add_dong_metric_heatmap(m, geojson, metrics, metric)
     add_bike_station_layers(m, tables["bike_stations"])
-    add_tago_heatmap(m, load_tago_points(tago_glob))
+    add_tago_heatmap(m, tago_points)
 
     MiniMap(toggle_display=True).add_to(m)
     Fullscreen(position="topright").add_to(m)
@@ -846,7 +965,10 @@ def main() -> None:
     parser.add_argument(
         "--map-metric",
         default="auto",
-        help="Dong metric for map overlay. Use auto, x_star_i, mean_H, mean_competitor_count, etc.",
+        help=(
+            "Dong metric for map overlay. Use auto, x_star_i, mean_H, "
+            "mean_competitor_count, raw_pm_count, raw_pm_mean_battery, etc."
+        ),
     )
     parser.add_argument(
         "--tago-glob",
@@ -856,6 +978,7 @@ def main() -> None:
     parser.add_argument("--charts-output", default="charts_dashboard.html")
     parser.add_argument("--map-output", default="seoul_map.html")
     parser.add_argument("--page-title", default="GCOO Charts")
+    parser.add_argument("--zoom-start", type=int, default=13)
     args = parser.parse_args()
 
     input_dir = Path(args.input)
@@ -875,6 +998,7 @@ def main() -> None:
         out_path=map_path,
         metric=selected_metric,
         tago_glob=args.tago_glob,
+        zoom_start=args.zoom_start,
     )
 
     manifest = {

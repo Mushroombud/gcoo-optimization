@@ -53,8 +53,8 @@ def is_target_feature(
 ) -> bool:
     properties = feature.get("properties", {})
     values = [str(value) for value in properties.values() if value is not None]
-    if target_name and any(target_name in value for value in values):
-        return True
+    if target_name:
+        return any(target_name in value for value in values)
 
     code = first_property(properties, CODE_KEYS)
     return bool(code_prefix and code and code.startswith(code_prefix))
@@ -103,6 +103,9 @@ def build_target_geojson(
 
 
 def fetch_json(url: str) -> dict[str, Any]:
+    path = Path(url)
+    if path.exists():
+        return json.loads(path.read_text(encoding="utf-8"))
     response = requests.get(url, timeout=90)
     response.raise_for_status()
     return response.json()

@@ -1,70 +1,34 @@
 {
-  "input_dir": "outputs/prototype",
-  "charts_dashboard": "outputs/visualizations/charts_dashboard.html",
-  "seoul_map": "outputs/visualizations/seoul_map.html",
-  "selected_map_metric": "mean_H",
+  "input_dir": "outputs/sejong_map_input",
+  "charts_dashboard": "outputs/visualizations/sejong_charts_dashboard.html",
+  "map": "outputs/visualizations/sejong_map.html",
+  "selected_map_metric": "raw_pm_count",
+  "boundary_geojson": "data/raw/sejong_admin_dong.geojson",
   "boundary_source": "geojson",
   "tables": {
     "dong_master": {
-      "rows": 3,
-      "columns": [
-        "dong_id",
-        "dong_name",
-        "gu_name",
-        "area_km2"
-      ]
+      "rows": 0,
+      "columns": []
     },
     "model_inputs": {
-      "rows": 3,
-      "columns": [
-        "dong_id",
-        "p_i",
-        "c_i",
-        "K_i",
-        "x_obs_i",
-        "B_i"
-      ]
+      "rows": 0,
+      "columns": []
     },
     "allocation": {
-      "rows": 3,
-      "columns": [
-        "dong_id",
-        "x_star_i",
-        "total_supply_F"
-      ]
+      "rows": 0,
+      "columns": []
     },
     "demand": {
-      "rows": 4,
-      "columns": [
-        "scenario_day",
-        "dong_id",
-        "H_is",
-        "departures_is",
-        "avg_distance_km_i",
-        "arrivals_is"
-      ]
+      "rows": 0,
+      "columns": []
     },
     "tago": {
       "rows": 0,
-      "columns": [
-        "scenario_day",
-        "dong_id",
-        "gcoo_count_is",
-        "competitor_count_is",
-        "total_pm_count_is"
-      ]
+      "columns": []
     },
     "bike_stations": {
-      "rows": 5,
-      "columns": [
-        "station_id",
-        "station_name",
-        "latitude",
-        "longitude",
-        "parking_bike_count",
-        "rack_count",
-        "dong_id"
-      ]
+      "rows": 0,
+      "columns": []
     }
   }
 }
