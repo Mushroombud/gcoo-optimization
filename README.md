@@ -164,13 +164,21 @@ python3 src/run_pipeline.py --snapshot-label now --out outputs/latest_run
 scripts/setup_sejong_tago_cron.sh --interval-minutes 5
 ```
 
+기본 실행은 `outputs/visualizations`를 nginx로 함께 서빙합니다. 기본 포트는 기존 웹서버와의 충돌을 피하기 위해 `8080`입니다.
+
+```bash
+scripts/setup_sejong_tago_cron.sh --interval-minutes 5 --static-port 8080
+scripts/setup_sejong_tago_cron.sh --interval-minutes 5 --static-port 80 --server-name pm.example.com
+scripts/setup_sejong_tago_cron.sh --interval-minutes 5 --no-static-serving
+```
+
 서버 사전 조건:
 
 ```bash
 OPEN_DATA_PORTAL_API_KEY="..."
 ```
 
-위 값은 `.env` 또는 `--env-file`로 전달한 파일에 있어야 합니다.
+위 값은 `.env` 또는 `--env-file`로 전달한 파일에 있어야 합니다. static serving을 켜는 기본 실행은 `sudo` 권한과 `nginx`가 필요합니다. nginx가 없으면 Debian/Ubuntu 계열 서버에서는 `apt-get`으로 자동 설치를 시도하고, 자동 설치를 막으려면 `--no-nginx-install`을 사용합니다.
 
 설정 스크립트가 수행하는 작업:
 
@@ -179,6 +187,7 @@ OPEN_DATA_PORTAL_API_KEY="..."
 3. 세종 TAGO 수집 1회 즉시 실행
 4. rolling 전처리 CSV 및 standalone visualization HTML 생성
 5. 현재 Unix 사용자에 대해 idempotent한 crontab 항목 등록
+6. `outputs/visualizations`를 nginx static root로 등록하고 nginx reload
 
 Cron이 호출하는 명령:
 
@@ -214,11 +223,20 @@ outputs/visualizations/sejong_map.html
 outputs/visualizations/sejong_visualization_manifest.json
 ```
 
+nginx static serving을 켠 경우 서버에서 다음 URL로 바로 확인할 수 있습니다.
+
+```text
+http://<server-ip-or-domain>:8080/
+http://<server-ip-or-domain>:8080/sejong_map.html
+http://<server-ip-or-domain>:8080/sejong_charts_dashboard.html
+```
+
 cron 작업과 로그 확인:
 
 ```bash
 crontab -l | grep gcoo-sejong-tago-cron
 tail -f logs/sejong_tago_cron.log
+curl -I http://<server-ip-or-domain>:8080/sejong_map.html
 ```
 
 ## Pivot 검토: 세종 TAGO 기반 또는 서울 따릉이 기반
