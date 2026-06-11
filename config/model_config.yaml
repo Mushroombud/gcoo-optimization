@@ -1,0 +1,67 @@
+spatial:
+  battery_threshold: 20
+  capacity_multiplier: 1.25
+  min_capacity_if_demand_positive: 3
+
+demand:
+  min_distance_km: 0.5
+  max_distance_km: 3.0
+  min_duration_min: 3
+  max_duration_min: 20
+  min_speed_kmph: 5
+  max_speed_kmph: 25
+  u0_avg_rides_per_scooter_day: 4
+
+revenue:
+  unlock_fee: 600
+  per_minute_fee: 180
+  avg_scooter_speed_kmph: 12
+
+cost:
+  variable_cost_per_ride: 300
+  base_fixed_cost_per_scooter_day: 2500
+  mu_imbalance_cost: 0.5
+
+nonlinear_model:
+  lambda_market_validation: 0.3
+  theta_competition_pressure: 1.0
+  U_max_rides_per_scooter_day: 6
+  beta_default_if_uncalibrated: 0.08
+
+simulation:
+  n_iterations: 1000
+  random_seed: 42
+
+sensitivity:
+  u0_values: [3, 4, 5, 6]
+  lambda_values: [0.0, 0.2, 0.3, 0.5]
+  theta_values: [0.5, 1.0, 1.5, 2.0]
+  U_values: [4, 6, 8]
+  speed_values: [10, 12, 15]
+  mu_values: [0.0, 0.5, 1.0]
+
+data_input:
+  paths:
+    raw_api_dir: data/raw/api
+    manifest_jsonl: data/raw/snapshot_manifest.jsonl
+    seoul_bike_stations_csv: data/raw/seoul_bike_stations.csv
+    tago_pm_snapshot_pattern: data/raw/tago_pm_snapshots_{label}.csv
+    private_pm_operator_summary_csv: data/raw/seoul_private_pm_operator_summary.csv
+  apis:
+    seoul_bike:
+      rows_per_page: 1000
+      max_pages: 10
+    tago_pm:
+      # Set TAGO_PM_API_URL in .env or put the real shared-PM endpoint here.
+      # The OPEN_DATA_PORTAL_API_KEY value is injected as serviceKey automatically.
+      url: ""
+      params:
+        _type: json
+        pageNo: 1
+        numOfRows: 1000
+
+model:
+  inputs:
+    seoul_bike_stations_csv: data/raw/seoul_bike_stations.csv
+    tago_pm_snapshots_glob: data/raw/tago_pm_snapshots_*.csv
+    private_pm_operator_summary_csv: data/raw/seoul_private_pm_operator_summary.csv

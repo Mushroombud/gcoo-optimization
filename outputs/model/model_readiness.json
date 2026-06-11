@@ -1,0 +1,9 @@
+{
+  "bike_station_rows": 2721,
+  "tago_pm_raw_rows": 0,
+  "can_optimize": false,
+  "notes": [
+    "Loaded Seoul Bike station file: data/raw/seoul_bike_stations.csv",
+    "No TAGO PM snapshot files found. Run data input with TAGO_PM_API_URL configured."
+  ]
+}
