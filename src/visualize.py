@@ -317,8 +317,9 @@ def render_chart_dashboard(
     tables: dict[str, pd.DataFrame],
     metrics: pd.DataFrame,
     out_path: Path,
+    page_title: str,
 ) -> None:
-    page = Page(layout=Page.SimplePageLayout, page_title="GCOO Seoul Charts")
+    page = Page(layout=Page.SimplePageLayout, page_title=page_title)
     page.add(
         make_allocation_chart(metrics),
         make_demand_competition_chart(metrics),
@@ -829,14 +830,18 @@ def render_map(
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Render interactive GCOO charts and Seoul map visualizations."
+        description="Render interactive GCOO charts and map visualizations."
     )
     parser.add_argument("--input", default="outputs/model", help="Model/prototype output directory.")
     parser.add_argument("--out", default="outputs/visualizations", help="Visualization output directory.")
     parser.add_argument(
         "--seoul-geojson",
         default="data/raw/seoul_admin_dong.geojson",
-        help="Optional Seoul administrative dong GeoJSON boundary file.",
+        help="Deprecated alias for --boundary-geojson.",
+    )
+    parser.add_argument(
+        "--boundary-geojson",
+        help="Administrative dong GeoJSON boundary file. Defaults to --seoul-geojson.",
     )
     parser.add_argument(
         "--map-metric",
@@ -848,6 +853,9 @@ def main() -> None:
         default="data/raw/tago_pm_snapshots_*.csv",
         help="Raw PM snapshot glob used for point heatmaps when available.",
     )
+    parser.add_argument("--charts-output", default="charts_dashboard.html")
+    parser.add_argument("--map-output", default="seoul_map.html")
+    parser.add_argument("--page-title", default="GCOO Charts")
     args = parser.parse_args()
 
     input_dir = Path(args.input)
@@ -856,13 +864,14 @@ def main() -> None:
     metrics = build_dong_metrics(tables)
     selected_metric = choose_map_metric(metrics, args.map_metric)
 
-    charts_path = out_dir / "charts_dashboard.html"
-    map_path = out_dir / "seoul_map.html"
-    render_chart_dashboard(tables, metrics, charts_path)
+    charts_path = out_dir / args.charts_output
+    map_path = out_dir / args.map_output
+    boundary_geojson = args.boundary_geojson or args.seoul_geojson
+    render_chart_dashboard(tables, metrics, charts_path, args.page_title)
     boundary_source = render_map(
         tables=tables,
         metrics=metrics,
-        geojson_path=Path(args.seoul_geojson),
+        geojson_path=Path(boundary_geojson),
         out_path=map_path,
         metric=selected_metric,
         tago_glob=args.tago_glob,
@@ -871,8 +880,9 @@ def main() -> None:
     manifest = {
         "input_dir": str(input_dir),
         "charts_dashboard": str(charts_path),
-        "seoul_map": str(map_path),
+        "map": str(map_path),
         "selected_map_metric": selected_metric,
+        "boundary_geojson": boundary_geojson,
         "boundary_source": boundary_source,
         "tables": {
             name: {"rows": int(len(df)), "columns": list(df.columns)}

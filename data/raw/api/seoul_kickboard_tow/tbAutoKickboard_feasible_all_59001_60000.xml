@@ -1,2 +1,0 @@
-<RESULT><CODE>ERROR-500</CODE><MESSAGE><![CDATA[서버 오류입니다.
-지속적으로 발생시 열린 데이터 광장으로 문의(Q&A) 바랍니다.(HTTP operation failed invoking http://openapi.seoul.go.kr:8088/4a5a4b565270617537375579535956/json/tbAutoKickboard/59001/60000/ with statusCode: 503)]]></MESSAGE></RESULT>

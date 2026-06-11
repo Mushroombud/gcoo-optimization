@@ -158,27 +158,98 @@ python3 src/run_pipeline.py --snapshot-label now --out outputs/latest_run
 
 ## Visualization Setup
 
-Visualization is split into two interactive HTML outputs:
+Visualization is the main inspection surface for this project. The current setup generates two standalone interactive HTML files:
 
-1. numeric charts from optimization/scenario CSVs,
-2. Seoul map visualizations with dong overlays, heatmaps, and bike station markers.
+1. `charts_dashboard.html`: numeric charts from optimization/scenario CSVs.
+2. `seoul_map.html`: Seoul map overlay with administrative dong boundaries, heatmaps, and bike station markers.
 
-The setup uses Python packages instead of adding a React app:
+The setup intentionally uses Python packages instead of adding a React app:
 
-- `pyecharts`: Python wrapper for Apache ECharts, used for interactive chart dashboards.
-- `folium`: Python wrapper for Leaflet, used for Seoul map overlay and heatmap HTML.
+- `pyecharts`: Apache ECharts-backed interactive chart dashboard.
+- `folium`: Leaflet-backed map overlay and heatmap rendering.
+- `branca`: color scale support for map overlays.
 
-Install dependencies:
+### 1. Install visualization dependencies
+
+Run this once from the repository root:
 
 ```bash
 python3 -m pip install -r requirements.txt
 ```
 
-Generate fixture-backed prototype outputs and then render both visualization surfaces:
+This installs the normal data/model dependencies plus:
+
+```text
+pyecharts
+folium
+branca
+```
+
+### 2. Prepare Seoul administrative dong boundaries
+
+The map visualizer looks for this file:
+
+```text
+data/raw/seoul_admin_dong.geojson
+```
+
+Generate it with:
+
+```bash
+python3 src/fetch_seoul_boundary.py --out data/raw/seoul_admin_dong.geojson
+```
+
+Expected output:
+
+```text
+boundary=data/raw/seoul_admin_dong.geojson
+features=426
+source=https://raw.githubusercontent.com/vuski/admdongkor/master/ver20250401/HangJeongDong_ver20250401.geojson
+```
+
+If this file is missing, `src/visualize.py` still runs by falling back to the tiny fixture bounding boxes from `src/prototype_pipeline.py`. That fallback is only for smoke testing. Use the real GeoJSON for any serious visual inspection.
+
+### 3. Generate data to visualize
+
+For a quick local smoke test, generate fixture-backed prototype outputs:
 
 ```bash
 python3 src/prototype_pipeline.py --out outputs/prototype
+```
+
+For real model outputs, run the model pipeline instead:
+
+```bash
+python3 src/model.py --out outputs/model
+```
+
+If real Seoul-matching TAGO PM snapshots are not available yet, the model may only write a readiness report. In that case, use `outputs/prototype` or `outputs/model_fixture` for visual smoke testing:
+
+```bash
+python3 src/model.py --out outputs/model_fixture --allow-fixtures
+```
+
+### 4. Render the visualization HTML
+
+Render both chart and map outputs from a model/prototype output directory:
+
+```bash
 python3 src/visualize.py --input outputs/prototype --out outputs/visualizations
+```
+
+or:
+
+```bash
+python3 src/visualize.py --input outputs/model --out outputs/visualizations
+```
+
+Expected output:
+
+```text
+charts=outputs/visualizations/charts_dashboard.html
+map=outputs/visualizations/seoul_map.html
+map_metric=<selected_metric>
+boundary_source=geojson
 ```
 
 Generated files:
@@ -189,24 +260,108 @@ outputs/visualizations/seoul_map.html
 outputs/visualizations/visualization_manifest.json
 ```
 
-For real Seoul administrative dong boundaries, place a GeoJSON at:
+`visualization_manifest.json` records which input directory was used, which tables were loaded, which map metric was selected, and whether the map used real GeoJSON boundaries or fixture bounding boxes.
+
+### 5. Choose the map overlay metric
+
+By default, the visualizer uses `--map-metric auto`. Auto mode picks the first useful metric with non-zero values in this order:
 
 ```text
-data/raw/seoul_admin_dong.geojson
+x_star_i
+mean_H
+mean_total_pm_count
+mean_competitor_count
+x_obs_i
+K_i
 ```
 
-You can generate it from the bundled downloader:
+Override the metric explicitly when inspecting a specific question:
+
+```bash
+python3 src/visualize.py --input outputs/model --out outputs/visualizations --map-metric x_star_i
+python3 src/visualize.py --input outputs/model --out outputs/visualizations --map-metric mean_H
+python3 src/visualize.py --input outputs/model --out outputs/visualizations --map-metric mean_competitor_count
+```
+
+Common metric meanings:
+
+| Metric | Meaning |
+| --- | --- |
+| `x_star_i` | optimized GCOO scooter placement by dong |
+| `mean_H` | average PM-like demand by dong |
+| `mean_competitor_count` | average competitor PM count by dong |
+| `mean_gcoo_count` | average observed GCOO PM count by dong |
+| `K_i` | dong capacity used by the optimization model |
+| `B_i` | imbalance score from arrivals/departures |
+
+### 6. Open the visualization in a browser
+
+The output files are static HTML. The most reliable way to inspect them is to serve the repo locally:
+
+```bash
+python3 -m http.server 8765 --bind 127.0.0.1
+```
+
+Then open:
+
+```text
+http://127.0.0.1:8765/outputs/visualizations/charts_dashboard.html
+http://127.0.0.1:8765/outputs/visualizations/seoul_map.html
+```
+
+If port `8765` is already in use, choose another port:
+
+```bash
+python3 -m http.server 8770 --bind 127.0.0.1
+```
+
+You can stop the server with `Ctrl+C`.
+
+### 7. Visualization input contract
+
+`src/visualize.py` expects the selected `--input` directory to contain the CSV outputs written by `src/model.py` or `src/prototype_pipeline.py`.
+
+| File | Required | Used for |
+| --- | --- | --- |
+| `allocation_optimized.csv` | yes for allocation charts | optimized placement chart and `x_star_i` map layer |
+| `model_inputs.csv` | recommended | capacity, observed supply, imbalance diagnostics |
+| `demand_scenario.csv` | recommended | demand charts and `mean_H` map layer |
+| `tago_scenario.csv` | recommended | GCOO/competitor count charts |
+| `bike_stations_with_dong.csv` or `bike_stations_normalized.csv` | recommended | station markers and station heatmap |
+| `dong_master.csv` | recommended | readable dong labels |
+
+Optional files:
+
+| File | Used for |
+| --- | --- |
+| `data/raw/seoul_admin_dong.geojson` | real Seoul administrative dong polygon overlay |
+| `data/raw/tago_pm_snapshots_*.csv` | raw PM point heatmap when available |
+
+### 8. Troubleshooting
+
+If the map prints `boundary_source=fixture_bbox`, the real Seoul boundary file was not found. Run:
 
 ```bash
 python3 src/fetch_seoul_boundary.py --out data/raw/seoul_admin_dong.geojson
 ```
 
-The visualizer will use that file automatically. Until it exists, `seoul_map.html` uses the current fixture dong bounding boxes from `src/prototype_pipeline.py`, so map generation still works for smoke testing. The map metric defaults to `auto`; override it when needed:
+If the map renders but the overlay values are all zero, the selected `--map-metric` is probably missing or zero in the input CSVs. Try:
 
 ```bash
-python3 src/visualize.py --input outputs/model --map-metric x_star_i
-python3 src/visualize.py --input outputs/model --map-metric mean_H
-python3 src/visualize.py --input outputs/model --map-metric mean_competitor_count
+python3 src/visualize.py --input outputs/prototype --out outputs/visualizations --map-metric mean_H
+```
+
+If `outputs/model` only contains `model_readiness.json`, the model did not have enough real input data to optimize. Use fixture mode for visualization smoke testing:
+
+```bash
+python3 src/model.py --out outputs/model_fixture --allow-fixtures
+python3 src/visualize.py --input outputs/model_fixture --out outputs/visualizations
+```
+
+If browser loading looks stale, rerun the visualizer and refresh the browser page:
+
+```bash
+python3 src/visualize.py --input outputs/prototype --out outputs/visualizations
 ```
 
 ## Run
