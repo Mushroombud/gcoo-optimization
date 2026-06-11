@@ -1,0 +1,126 @@
+{
+  "processed_dir": "data/processed/sejong_tago",
+  "charts_dashboard": "outputs/visualizations/sejong_charts_dashboard.html",
+  "map": "outputs/visualizations/sejong_map.html",
+  "map_result": {
+    "latest_rows": 4165,
+    "zone_markers": 369,
+    "device_markers": 500,
+    "center": [
+      36.496316,
+      127.283196
+    ]
+  },
+  "tables": {
+    "accumulated": {
+      "rows": 8330,
+      "columns": [
+        "timestamp",
+        "operator_name",
+        "device_id",
+        "battery_level",
+        "latitude",
+        "longitude",
+        "city_code",
+        "city_name",
+        "source_file",
+        "battery_effective",
+        "snapshot_date",
+        "snapshot_hour",
+        "zone_lat_index",
+        "zone_lon_index",
+        "zone_id",
+        "zone_center_latitude",
+        "zone_center_longitude"
+      ]
+    },
+    "latest": {
+      "rows": 4165,
+      "columns": [
+        "timestamp",
+        "operator_name",
+        "device_id",
+        "battery_level",
+        "latitude",
+        "longitude",
+        "city_code",
+        "city_name",
+        "source_file",
+        "battery_effective",
+        "snapshot_date",
+        "snapshot_hour",
+        "zone_lat_index",
+        "zone_lon_index",
+        "zone_id",
+        "zone_center_latitude",
+        "zone_center_longitude"
+      ]
+    },
+    "operator_counts": {
+      "rows": 4,
+      "columns": [
+        "timestamp",
+        "operator_name",
+        "device_count",
+        "effective_device_count",
+        "avg_battery",
+        "p10_battery",
+        "median_battery",
+        "low_battery_count",
+        "zone_count"
+      ]
+    },
+    "zone_counts": {
+      "rows": 798,
+      "columns": [
+        "timestamp",
+        "zone_id",
+        "operator_name",
+        "device_count",
+        "effective_device_count",
+        "avg_battery",
+        "zone_center_latitude",
+        "zone_center_longitude"
+      ]
+    },
+    "device_intervals": {
+      "rows": 4165,
+      "columns": [
+        "timestamp",
+        "prev_timestamp",
+        "operator_name",
+        "device_id",
+        "prev_zone_id",
+        "zone_id",
+        "prev_latitude",
+        "prev_longitude",
+        "latitude",
+        "longitude",
+        "interval_minutes",
+        "distance_m",
+        "speed_kmph",
+        "prev_battery_level",
+        "battery_level",
+        "battery_delta",
+        "moved_50m",
+        "moved_200m",
+        "same_zone"
+      ]
+    },
+    "activity_by_zone": {
+      "rows": 399,
+      "columns": [
+        "timestamp",
+        "zone_id",
+        "operator_name",
+        "interval_count",
+        "moved_50m_count",
+        "moved_200m_count",
+        "avg_distance_m",
+        "median_distance_m",
+        "avg_speed_kmph",
+        "avg_battery_delta"
+      ]
+    }
+  }
+}

@@ -1,0 +1,31 @@
+{
+  "ok": true,
+  "created_at": "2026-06-12T06:24:32+09:00",
+  "raw_file_count": 2,
+  "snapshot_count": 2,
+  "row_count": 8330,
+  "latest_timestamp": "2026-06-12T06:24:31+0900",
+  "latest_device_count": 4165,
+  "latest_effective_device_count": 4165,
+  "operator_counts_latest": {
+    "ALPACA": 1368,
+    "GBIKE": 2797
+  },
+  "device_interval_count": 4165,
+  "moved_50m_interval_count": 11,
+  "moved_200m_interval_count": 10,
+  "zone_size_m": 500,
+  "grid": {
+    "lat_step": 0.0044915558749550845,
+    "lon_step": 0.00558724123081862,
+    "reference_latitude": 36.496316
+  },
+  "outputs": {
+    "accumulated": "data/processed/sejong_tago/sejong_pm_snapshots_accumulated.csv",
+    "latest": "data/processed/sejong_tago/sejong_pm_latest_snapshot.csv",
+    "operator_counts": "data/processed/sejong_tago/sejong_pm_operator_snapshot_counts.csv",
+    "zone_counts": "data/processed/sejong_tago/sejong_pm_zone_snapshot_counts.csv",
+    "device_intervals": "data/processed/sejong_tago/sejong_pm_device_intervals.csv",
+    "activity_by_zone": "data/processed/sejong_tago/sejong_pm_activity_by_zone.csv"
+  }
+}

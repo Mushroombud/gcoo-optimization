@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import glob
+import html
 import json
 from pathlib import Path
 from typing import Any
@@ -10,7 +11,7 @@ import folium
 import pandas as pd
 from branca.element import Element
 from branca.colormap import LinearColormap
-from folium.plugins import Fullscreen, HeatMap, MiniMap
+from folium.plugins import Fullscreen, HeatMap, MarkerCluster, MiniMap
 from pyecharts import options as opts
 from pyecharts.charts import Bar, Line, Page, Scatter
 
@@ -19,6 +20,16 @@ from prototype_pipeline import make_fixture_dongs
 
 
 SEOUL_CENTER = [37.5665, 126.9780]
+DEFAULT_TAGO_ICON_LIMIT = 5000
+PM_OPERATOR_COLORS = [
+    "#0f766e",
+    "#2563eb",
+    "#7c3aed",
+    "#db2777",
+    "#ea580c",
+    "#16a34a",
+    "#0891b2",
+]
 DONG_ID_COLUMNS = ["dong_id", "origin_dong_id", "destination_dong_id"]
 NUMERIC_COLUMNS = [
     "x_star_i",
@@ -39,6 +50,7 @@ NUMERIC_COLUMNS = [
     "longitude",
     "parking_bike_count",
     "rack_count",
+    "battery_level",
 ]
 
 
@@ -866,6 +878,356 @@ def add_bike_station_layers(m: folium.Map, bike: pd.DataFrame) -> None:
         ).add_to(m)
 
 
+def pm_operator_color(operator_name: Any) -> str:
+    text = str(operator_name or "UNKNOWN")
+    return PM_OPERATOR_COLORS[sum(ord(char) for char in text) % len(PM_OPERATOR_COLORS)]
+
+
+def pm_battery_status(value: Any) -> tuple[str, str, str]:
+    battery = pd.to_numeric(value, errors="coerce")
+    if pd.isna(battery):
+        return "unknown", "Battery unknown", "#64748b"
+    if float(battery) < 20:
+        return "critical", f"{float(battery):.0f}% battery", "#dc2626"
+    if float(battery) < 50:
+        return "low", f"{float(battery):.0f}% battery", "#f59e0b"
+    return "ok", f"{float(battery):.0f}% battery", "#16a34a"
+
+
+def hero_icon_svg(name: str) -> str:
+    paths = {
+        "bolt": """
+<path stroke-linecap="round" stroke-linejoin="round" d="M13 3L4 14h7l-1 7 10-12h-7l0-6z" />
+""",
+        "warning": """
+<path stroke-linecap="round" stroke-linejoin="round" d="M12 9v4m0 4h.01M10.3 4.7 2.8 17.8A2 2 0 0 0 4.5 21h15a2 2 0 0 0 1.7-3.2L13.7 4.7a2 2 0 0 0-3.4 0z" />
+""",
+        "cluster": """
+<path stroke-linecap="round" stroke-linejoin="round" d="M8 7a4 4 0 1 1 8 0 4 4 0 0 1-8 0zM4 20a8 8 0 0 1 16 0M19 8h2m-1-1v2" />
+""",
+        "map_pin": """
+<path stroke-linecap="round" stroke-linejoin="round" d="M12 21s7-4.5 7-11a7 7 0 1 0-14 0c0 6.5 7 11 7 11z" />
+<path stroke-linecap="round" stroke-linejoin="round" d="M12 10.5h.01" />
+""",
+    }
+    body = paths.get(name, paths["map_pin"])
+    return f"""
+<svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+  {body}
+</svg>
+"""
+
+
+def add_tago_icon_styles(m: folium.Map) -> None:
+    css = """
+<style>
+.gcoo-pm-div-icon {
+  background: transparent;
+  border: 0;
+}
+.gcoo-pm-marker {
+  --operator-color: #2563eb;
+  --battery-color: #16a34a;
+  width: 34px;
+  height: 34px;
+  border-radius: 999px;
+  background: var(--operator-color);
+  border: 2px solid #fff;
+  box-shadow: 0 12px 22px rgba(15, 23, 42, 0.28);
+  color: #fff;
+  display: grid;
+  place-items: center;
+  position: relative;
+  transform: translateY(-4px);
+}
+.gcoo-pm-marker::after {
+  background: var(--operator-color);
+  border-bottom: 2px solid #fff;
+  border-right: 2px solid #fff;
+  bottom: -5px;
+  content: "";
+  height: 10px;
+  left: 10px;
+  position: absolute;
+  transform: rotate(45deg);
+  width: 10px;
+}
+.gcoo-pm-marker svg {
+  height: 18px;
+  position: relative;
+  stroke: currentColor;
+  stroke-width: 2;
+  width: 18px;
+  z-index: 1;
+}
+.gcoo-pm-marker.low,
+.gcoo-pm-marker.critical {
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--battery-color) 32%, transparent),
+    0 12px 22px rgba(15, 23, 42, 0.3);
+}
+.gcoo-pm-battery-dot {
+  background: var(--battery-color);
+  border: 2px solid #fff;
+  border-radius: 999px;
+  height: 10px;
+  position: absolute;
+  right: -2px;
+  top: -2px;
+  width: 10px;
+  z-index: 2;
+}
+.gcoo-pm-cluster-icon {
+  background: transparent;
+  border: 0;
+}
+.gcoo-pm-cluster {
+  align-items: center;
+  background: #0f172a;
+  border: 2px solid #fff;
+  border-radius: 999px;
+  box-shadow: 0 16px 28px rgba(15, 23, 42, 0.28);
+  color: #fff;
+  display: flex;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-size: 13px;
+  font-weight: 800;
+  gap: 4px;
+  height: 46px;
+  justify-content: center;
+  width: 46px;
+}
+.gcoo-pm-cluster svg {
+  height: 15px;
+  stroke: currentColor;
+  stroke-width: 2;
+  width: 15px;
+}
+.gcoo-pm-popup {
+  color: #111827;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  min-width: 210px;
+}
+.gcoo-pm-popup-title {
+  align-items: center;
+  display: flex;
+  font-size: 14px;
+  font-weight: 800;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+.gcoo-pm-popup-title svg {
+  color: var(--operator-color);
+  height: 18px;
+  stroke: currentColor;
+  stroke-width: 2;
+  width: 18px;
+}
+.gcoo-pm-popup-grid {
+  display: grid;
+  gap: 5px 10px;
+  grid-template-columns: 72px minmax(92px, auto);
+}
+.gcoo-pm-popup-key {
+  color: #64748b;
+  font-weight: 700;
+}
+.gcoo-pm-popup-value {
+  color: #111827;
+  font-weight: 500;
+}
+.gcoo-pm-legend {
+  background: rgba(255, 255, 255, 0.94);
+  border: 1px solid rgba(15, 23, 42, 0.12);
+  border-radius: 8px;
+  bottom: 28px;
+  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.18);
+  color: #111827;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-size: 12px;
+  line-height: 1.45;
+  padding: 10px 12px;
+  position: fixed;
+  right: 18px;
+  z-index: 9999;
+}
+.gcoo-pm-legend-title {
+  align-items: center;
+  display: flex;
+  font-size: 13px;
+  font-weight: 800;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+.gcoo-pm-legend-title svg {
+  height: 16px;
+  stroke: currentColor;
+  stroke-width: 2;
+  width: 16px;
+}
+.gcoo-pm-legend-row {
+  align-items: center;
+  display: flex;
+  gap: 7px;
+  margin-top: 4px;
+}
+.gcoo-pm-legend-swatch {
+  border: 1px solid #fff;
+  border-radius: 999px;
+  box-shadow: 0 0 0 1px rgba(15, 23, 42, 0.12);
+  height: 10px;
+  width: 10px;
+}
+</style>
+"""
+    m.get_root().header.add_child(Element(css))
+
+
+def tago_marker_html(row: Any) -> str:
+    operator_name = str(getattr(row, "operator_name", "UNKNOWN") or "UNKNOWN")
+    status, _, battery_color = pm_battery_status(getattr(row, "battery_level", None))
+    icon_name = "warning" if status in {"critical", "low"} else "bolt"
+    return f"""
+<div class="gcoo-pm-marker {status}"
+     style="--operator-color: {pm_operator_color(operator_name)}; --battery-color: {battery_color};"
+     title="{html.escape(operator_name)}">
+  {hero_icon_svg(icon_name)}
+  <span class="gcoo-pm-battery-dot"></span>
+</div>
+"""
+
+
+def tago_popup_html(row: Any) -> str:
+    operator_name = str(getattr(row, "operator_name", "UNKNOWN") or "UNKNOWN")
+    device_id = str(getattr(row, "device_id", "") or "")
+    city_name = str(getattr(row, "city_name", "") or "")
+    timestamp = str(getattr(row, "timestamp", "") or "")
+    _, battery_label, battery_color = pm_battery_status(getattr(row, "battery_level", None))
+    color = pm_operator_color(operator_name)
+    return f"""
+<div class="gcoo-pm-popup" style="--operator-color: {color}; --battery-color: {battery_color};">
+  <div class="gcoo-pm-popup-title">
+    {hero_icon_svg("bolt")}
+    <span>{html.escape(operator_name)}</span>
+  </div>
+  <div class="gcoo-pm-popup-grid">
+    <span class="gcoo-pm-popup-key">Device</span>
+    <span class="gcoo-pm-popup-value">{html.escape(device_id)}</span>
+    <span class="gcoo-pm-popup-key">Battery</span>
+    <span class="gcoo-pm-popup-value">{html.escape(battery_label)}</span>
+    <span class="gcoo-pm-popup-key">City</span>
+    <span class="gcoo-pm-popup-value">{html.escape(city_name)}</span>
+    <span class="gcoo-pm-popup-key">Snapshot</span>
+    <span class="gcoo-pm-popup-value">{html.escape(timestamp)}</span>
+  </div>
+</div>
+"""
+
+
+def select_tago_icon_points(tago_points: pd.DataFrame, max_icons: int) -> pd.DataFrame:
+    if tago_points.empty or max_icons == 0:
+        return pd.DataFrame(columns=tago_points.columns)
+    if max_icons < 0 or len(tago_points) <= max_icons:
+        return tago_points
+    ranked = tago_points.copy()
+    if "battery_level" in ranked.columns:
+        ranked["_battery_rank"] = pd.to_numeric(ranked["battery_level"], errors="coerce").fillna(101)
+    else:
+        ranked["_battery_rank"] = 101
+    sort_columns = [
+        column
+        for column in ["_battery_rank", "operator_name", "device_id"]
+        if column in ranked.columns
+    ]
+    return ranked.sort_values(sort_columns).head(max_icons)
+
+
+def add_tago_icon_legend(
+    m: folium.Map,
+    tago_points: pd.DataFrame,
+    rendered_points: pd.DataFrame,
+) -> None:
+    if rendered_points.empty:
+        return
+    operator_counts = rendered_points["operator_name"].fillna("UNKNOWN").astype(str).value_counts().head(6)
+    rows = []
+    for operator_name, count in operator_counts.items():
+        rows.append(
+            f"""
+<div class="gcoo-pm-legend-row">
+  <span class="gcoo-pm-legend-swatch" style="background: {pm_operator_color(operator_name)};"></span>
+  <span>{html.escape(operator_name)}: {int(count)}</span>
+</div>
+"""
+        )
+    if len(rendered_points) < len(tago_points):
+        rows.append(
+            f"""
+<div class="gcoo-pm-legend-row">
+  <span class="gcoo-pm-legend-swatch" style="background: #64748b;"></span>
+  <span>Showing low-battery priority {len(rendered_points):,}/{len(tago_points):,}</span>
+</div>
+"""
+        )
+    legend = f"""
+<div class="gcoo-pm-legend">
+  <div class="gcoo-pm-legend-title">
+    {hero_icon_svg("map_pin")}
+    <span>TAGO PM devices</span>
+  </div>
+  <div>{len(rendered_points):,} icon markers / {len(tago_points):,} raw points</div>
+  {''.join(rows)}
+  <div class="gcoo-pm-legend-row">
+    <span class="gcoo-pm-legend-swatch" style="background: #dc2626;"></span>
+    <span>Battery below 20%</span>
+  </div>
+</div>
+"""
+    m.get_root().html.add_child(Element(legend))
+
+
+def add_tago_icon_markers(
+    m: folium.Map,
+    tago_points: pd.DataFrame,
+    max_icons: int,
+) -> int:
+    if tago_points.empty:
+        return 0
+    rendered = select_tago_icon_points(tago_points, max_icons)
+    if rendered.empty:
+        return 0
+
+    add_tago_icon_styles(m)
+    cluster_icon = hero_icon_svg("cluster").replace("\n", "")
+    cluster = MarkerCluster(
+        name=f"TAGO PM icon markers ({len(rendered):,})",
+        icon_create_function=f"""
+function(cluster) {{
+  const count = cluster.getChildCount();
+  return L.divIcon({{
+    html: `<div class="gcoo-pm-cluster">{cluster_icon}<span>${{count}}</span></div>`,
+    className: 'gcoo-pm-cluster-icon',
+    iconSize: [46, 46]
+  }});
+}}
+""",
+    ).add_to(m)
+
+    for row in rendered.itertuples():
+        folium.Marker(
+            location=[float(row.latitude), float(row.longitude)],
+            icon=folium.DivIcon(
+                html=tago_marker_html(row),
+                icon_size=(34, 42),
+                icon_anchor=(17, 38),
+                class_name="gcoo-pm-div-icon",
+            ),
+            popup=folium.Popup(tago_popup_html(row), max_width=310),
+        ).add_to(cluster)
+
+    add_tago_icon_legend(m, tago_points, rendered)
+    return len(rendered)
+
+
 def add_tago_heatmap(m: folium.Map, tago_points: pd.DataFrame) -> None:
     if tago_points.empty:
         return
@@ -919,8 +1281,9 @@ def render_map(
     out_path: Path,
     metric: str,
     tago_glob: str,
+    max_tago_icons: int,
     zoom_start: int,
-) -> str:
+) -> dict[str, Any]:
     geojson = load_geojson(geojson_path)
     tago_points = load_tago_points(tago_glob)
     if metric in {"raw_pm_count", "raw_pm_mean_battery"}:
@@ -938,13 +1301,18 @@ def render_map(
     add_dong_metric_heatmap(m, geojson, metrics, metric)
     add_bike_station_layers(m, tables["bike_stations"])
     add_tago_heatmap(m, tago_points)
+    rendered_tago_icons = add_tago_icon_markers(m, tago_points, max_tago_icons)
 
     MiniMap(toggle_display=True).add_to(m)
     Fullscreen(position="topright").add_to(m)
     folium.LayerControl(collapsed=False).add_to(m)
     m.save(str(out_path))
     inject_script_at_html_end(out_path, dong_hover_script(dong_layer_name))
-    return "geojson" if geojson_path and geojson_path.exists() else "fixture_bbox"
+    return {
+        "boundary_source": "geojson" if geojson_path and geojson_path.exists() else "fixture_bbox",
+        "tago_point_rows": int(len(tago_points)),
+        "tago_icon_markers": int(rendered_tago_icons),
+    }
 
 
 def main() -> None:
@@ -975,6 +1343,15 @@ def main() -> None:
         default="data/raw/tago_pm_snapshots_*.csv",
         help="Raw PM snapshot glob used for point heatmaps when available.",
     )
+    parser.add_argument(
+        "--max-tago-icons",
+        type=int,
+        default=DEFAULT_TAGO_ICON_LIMIT,
+        help=(
+            "Maximum raw TAGO PM points rendered as SVG icon markers. "
+            "Use -1 for all points or 0 to disable icon markers."
+        ),
+    )
     parser.add_argument("--charts-output", default="charts_dashboard.html")
     parser.add_argument("--map-output", default="seoul_map.html")
     parser.add_argument("--page-title", default="GCOO Charts")
@@ -991,13 +1368,14 @@ def main() -> None:
     map_path = out_dir / args.map_output
     boundary_geojson = args.boundary_geojson or args.seoul_geojson
     render_chart_dashboard(tables, metrics, charts_path, args.page_title)
-    boundary_source = render_map(
+    map_result = render_map(
         tables=tables,
         metrics=metrics,
         geojson_path=Path(boundary_geojson),
         out_path=map_path,
         metric=selected_metric,
         tago_glob=args.tago_glob,
+        max_tago_icons=args.max_tago_icons,
         zoom_start=args.zoom_start,
     )
 
@@ -1007,7 +1385,9 @@ def main() -> None:
         "map": str(map_path),
         "selected_map_metric": selected_metric,
         "boundary_geojson": boundary_geojson,
-        "boundary_source": boundary_source,
+        "boundary_source": map_result["boundary_source"],
+        "tago_point_rows": map_result["tago_point_rows"],
+        "tago_icon_markers": map_result["tago_icon_markers"],
         "tables": {
             name: {"rows": int(len(df)), "columns": list(df.columns)}
             for name, df in tables.items()
@@ -1017,7 +1397,9 @@ def main() -> None:
     print(f"charts={charts_path}")
     print(f"map={map_path}")
     print(f"map_metric={selected_metric}")
-    print(f"boundary_source={boundary_source}")
+    print(f"boundary_source={map_result['boundary_source']}")
+    print(f"tago_point_rows={map_result['tago_point_rows']}")
+    print(f"tago_icon_markers={map_result['tago_icon_markers']}")
 
 
 if __name__ == "__main__":

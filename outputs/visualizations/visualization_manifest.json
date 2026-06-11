@@ -5,6 +5,8 @@
   "selected_map_metric": "raw_pm_count",
   "boundary_geojson": "data/raw/sejong_admin_dong.geojson",
   "boundary_source": "geojson",
+  "tago_point_rows": 4165,
+  "tago_icon_markers": 4165,
   "tables": {
     "dong_master": {
       "rows": 0,
