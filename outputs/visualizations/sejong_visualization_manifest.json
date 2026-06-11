@@ -1,19 +1,19 @@
 {
-  "processed_dir": "data/processed/sejong_tago",
-  "charts_dashboard": "outputs/visualizations/sejong_charts_dashboard.html",
-  "map": "outputs/visualizations/sejong_map.html",
+  "processed_dir": "/root/gcoo-optimization/data/processed/sejong_tago",
+  "charts_dashboard": "/root/gcoo-optimization/outputs/visualizations/sejong_charts_dashboard.html",
+  "map": "/root/gcoo-optimization/outputs/visualizations/sejong_map.html",
   "map_result": {
     "latest_rows": 4165,
     "zone_markers": 369,
-    "device_markers": 300,
+    "device_markers": 1500,
     "center": [
-      36.496316,
+      36.496294,
       127.283196
     ]
   },
   "tables": {
     "accumulated": {
-      "rows": 8330,
+      "rows": 12495,
       "columns": [
         "timestamp",
         "operator_name",
@@ -57,7 +57,7 @@
       ]
     },
     "operator_counts": {
-      "rows": 4,
+      "rows": 6,
       "columns": [
         "timestamp",
         "operator_name",
@@ -71,7 +71,7 @@
       ]
     },
     "zone_counts": {
-      "rows": 798,
+      "rows": 1197,
       "columns": [
         "timestamp",
         "zone_id",
@@ -84,7 +84,7 @@
       ]
     },
     "device_intervals": {
-      "rows": 4165,
+      "rows": 8330,
       "columns": [
         "timestamp",
         "prev_timestamp",
@@ -108,7 +108,7 @@
       ]
     },
     "activity_by_zone": {
-      "rows": 399,
+      "rows": 798,
       "columns": [
         "timestamp",
         "zone_id",

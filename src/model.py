@@ -370,7 +370,7 @@ def run_model(args: argparse.Namespace) -> int:
         return 0
 
     model_inputs = build_model_inputs(dong_master, demand_scenario, tago_scenario, config)
-    allocation = optimize_allocation(model_inputs, demand_scenario, tago_scenario, config)
+    allocation = optimize_allocation(model_inputs, demand_scenario, tago_scenario, config, pm_like)
 
     dong_master.to_csv(out_dir / "dong_master.csv", index=False)
     bike_stations.to_csv(out_dir / "bike_stations_with_dong.csv", index=False)
@@ -392,6 +392,9 @@ def run_model(args: argparse.Namespace) -> int:
         ),
         "allocated_scooters": int(allocation["x_star_i"].sum()),
         "active_dongs": int((allocation["x_star_i"] > 0).sum()),
+        "expected_rebalancing_km": float(allocation["expected_rebalancing_km"].max()),
+        "expected_rebalancing_cost": float(allocation["expected_rebalancing_cost"].max()),
+        "expected_profit_after_rebalancing": float(allocation["expected_profit_after_rebalancing"].max()),
     }
     write_json(out_dir / "model_readiness.json", readiness)
     lines = [
@@ -404,6 +407,9 @@ def run_model(args: argparse.Namespace) -> int:
         f"- PM scenario rows: {len(tago_scenario)}",
         f"- Allocated scooters: {readiness['allocated_scooters']}",
         f"- Active dongs: {readiness['active_dongs']}",
+        f"- Expected rebalancing km: {readiness['expected_rebalancing_km']:.2f}",
+        f"- Expected rebalancing cost: {readiness['expected_rebalancing_cost']:.0f}",
+        f"- Expected profit after rebalancing: {readiness['expected_profit_after_rebalancing']:.0f}",
         "",
         "Notes:",
         *[f"- {note}" for note in notes],

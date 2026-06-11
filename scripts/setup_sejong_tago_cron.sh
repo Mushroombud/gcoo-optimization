@@ -10,9 +10,10 @@ RUN_INITIAL=1
 CRON_MARKER="gcoo-sejong-tago-cron"
 STATIC_SERVING=1
 STATIC_PORT=8080
-SERVER_NAME="_"
-NGINX_SITE_NAME="gcoo-sejong-tago"
-INSTALL_NGINX=1
+STATIC_BIND_HOST="127.0.0.1"
+CLOUDFLARED_BIN="cloudflared"
+CLOUDFLARE_TUNNEL=1
+CLOUDFLARE_TUNNEL_TOKEN="${CLOUDFLARE_TUNNEL_TOKEN:-}"
 
 usage() {
   cat <<'EOF'
@@ -24,17 +25,19 @@ Options:
   --interval-minutes N      Cron interval in minutes. Defaults to 5.
   --python PATH             Python executable for venv creation. Defaults to python3.
   --no-initial-run          Register cron without running one immediate collection.
-  --static-port N           Nginx static serving port for visualization HTML. Defaults to 8080.
-  --server-name NAME        Nginx server_name. Defaults to _.
-  --nginx-site-name NAME    Nginx site config name. Defaults to gcoo-sejong-tago.
-  --no-static-serving       Skip nginx setup and only register the collector cron.
-  --no-nginx-install        Do not install nginx automatically if it is missing.
+  --static-port N           Local static HTTP server port for visualization HTML. Defaults to 8080.
+  --static-bind-host HOST   Local static HTTP bind host. Defaults to 127.0.0.1.
+  --cloudflared PATH        cloudflared executable. Defaults to cloudflared.
+  --cloudflare-token TOKEN  Cloudflare Tunnel token. Defaults to CLOUDFLARE_TUNNEL_TOKEN.
+  --no-cloudflare-tunnel    Start only the local static HTTP server.
+  --no-static-serving       Skip static HTTP server/tunnel and only register the collector cron.
   -h, --help                Show this help.
 
 This script creates .venv, installs requirements.txt, runs one Sejong TAGO
 collection by default, and registers an idempotent crontab entry for the current
-Unix user. It also configures nginx to serve outputs/visualizations as static
-HTML unless --no-static-serving is passed.
+Unix user. It also serves outputs/visualizations with a local Python HTTP server
+and exposes it through Cloudflare Tunnel unless --no-static-serving is passed.
+If --cloudflare-token is omitted, cloudflared creates a temporary quick tunnel.
 EOF
 }
 
@@ -64,21 +67,30 @@ while [[ $# -gt 0 ]]; do
       STATIC_PORT="$2"
       shift 2
       ;;
-    --server-name)
-      SERVER_NAME="$2"
+    --static-bind-host)
+      STATIC_BIND_HOST="$2"
       shift 2
       ;;
-    --nginx-site-name)
-      NGINX_SITE_NAME="$2"
+    --cloudflared)
+      CLOUDFLARED_BIN="$2"
+      shift 2
+      ;;
+    --cloudflare-token)
+      CLOUDFLARE_TUNNEL_TOKEN="$2"
       shift 2
       ;;
     --no-static-serving)
       STATIC_SERVING=0
       shift
       ;;
-    --no-nginx-install)
-      INSTALL_NGINX=0
+    --no-cloudflare-tunnel)
+      CLOUDFLARE_TUNNEL=0
       shift
+      ;;
+    --server-name|--nginx-site-name|--no-nginx-install)
+      echo "$1 was removed; static serving now uses Cloudflare Tunnel instead of nginx." >&2
+      usage >&2
+      exit 2
       ;;
     -h|--help)
       usage
@@ -112,15 +124,9 @@ if (( STATIC_PORT < 1 || STATIC_PORT > 65535 )); then
   echo "--static-port must be between 1 and 65535." >&2
   exit 2
 fi
-case "${SERVER_NAME}" in
-  ''|*[!A-Za-z0-9._*-]*)
-    echo "--server-name may contain only letters, numbers, dot, underscore, hyphen, and wildcard." >&2
-    exit 2
-    ;;
-esac
-case "${NGINX_SITE_NAME}" in
-  ''|*[!A-Za-z0-9._-]*)
-    echo "--nginx-site-name may contain only letters, numbers, dot, underscore, and hyphen." >&2
+case "${STATIC_BIND_HOST}" in
+  ''|*[!A-Za-z0-9.:-]*)
+    echo "--static-bind-host may contain only letters, numbers, dot, colon, and hyphen." >&2
     exit 2
     ;;
 esac
@@ -151,11 +157,16 @@ VENV_DIR="${REPO_ROOT}/.venv"
 VENV_PYTHON="${VENV_DIR}/bin/python"
 LOG_DIR="${REPO_ROOT}/logs"
 LOG_FILE="${LOG_DIR}/sejong_tago_cron.log"
+STATIC_SERVER_LOG_FILE="${LOG_DIR}/sejong_tago_static_server.log"
+CLOUDFLARED_LOG_FILE="${LOG_DIR}/sejong_tago_cloudflared.log"
 PROCESSED_DIR="${REPO_ROOT}/data/processed/sejong_tago"
 VISUALIZATION_DIR="${REPO_ROOT}/outputs/visualizations"
 LOCK_FILE="${REPO_ROOT}/data/raw/sejong_tago_collect.lock"
+RUN_DIR="${REPO_ROOT}/.run"
+STATIC_SERVER_PID_FILE="${RUN_DIR}/sejong_tago_static_server.pid"
+CLOUDFLARED_PID_FILE="${RUN_DIR}/sejong_tago_cloudflared.pid"
 
-mkdir -p "${LOG_DIR}" "${PROCESSED_DIR}" "${VISUALIZATION_DIR}" "${REPO_ROOT}/data/raw"
+mkdir -p "${LOG_DIR}" "${PROCESSED_DIR}" "${VISUALIZATION_DIR}" "${REPO_ROOT}/data/raw" "${RUN_DIR}"
 
 if [[ ! -x "${VENV_PYTHON}" ]]; then
   "${PYTHON_BIN}" -m venv "${VENV_DIR}"
@@ -167,43 +178,6 @@ sq() {
   printf "'%s'" "$(printf "%s" "$1" | sed "s/'/'\\\\''/g")"
 }
 
-nginx_quote() {
-  printf '"%s"' "$(printf "%s" "$1" | sed 's/\\/\\\\/g; s/"/\\"/g')"
-}
-
-sudo_run() {
-  if [[ "${EUID}" -eq 0 ]]; then
-    "$@"
-  else
-    sudo "$@"
-  fi
-}
-
-ensure_sudo_available() {
-  if [[ "${EUID}" -ne 0 ]] && ! command -v sudo >/dev/null 2>&1; then
-    echo "sudo is required for nginx setup. Re-run as root or pass --no-static-serving." >&2
-    exit 1
-  fi
-}
-
-ensure_nginx_available() {
-  if command -v nginx >/dev/null 2>&1; then
-    return
-  fi
-  if (( INSTALL_NGINX == 0 )); then
-    echo "nginx is not installed. Install nginx or omit --no-nginx-install." >&2
-    exit 1
-  fi
-  if ! command -v apt-get >/dev/null 2>&1; then
-    echo "nginx is not installed and automatic installation currently supports apt-get only." >&2
-    echo "Install nginx manually or pass --no-static-serving." >&2
-    exit 1
-  fi
-
-  echo "nginx not found; installing with apt-get..."
-  sudo_run apt-get update
-  sudo_run env DEBIAN_FRONTEND=noninteractive apt-get install -y nginx
-}
 
 write_visualization_index() {
   cat > "${VISUALIZATION_DIR}/index.html" <<EOF
@@ -238,84 +212,71 @@ write_visualization_index() {
 EOF
 }
 
-write_nginx_site_config() {
-  local site_available="$1"
-  local root_value
-  root_value="$(nginx_quote "${VISUALIZATION_DIR}")"
+pid_is_running() {
+  local pid_file="$1"
+  local expected="$2"
 
-  if [[ "${EUID}" -eq 0 ]]; then
-    cat > "${site_available}" <<EOF
-server {
-    listen ${STATIC_PORT};
-    server_name ${SERVER_NAME};
+  if [[ ! -f "${pid_file}" ]]; then
+    return 1
+  fi
 
-    root ${root_value};
-    index index.html sejong_map.html;
+  local pid
+  pid="$(cat "${pid_file}")"
+  if [[ -z "${pid}" ]] || ! kill -0 "${pid}" >/dev/null 2>&1; then
+    return 1
+  fi
 
-    location / {
-        try_files \$uri \$uri/ /index.html;
-    }
+  if [[ -n "${expected}" ]] && command -v ps >/dev/null 2>&1; then
+    ps -p "${pid}" -o args= 2>/dev/null | grep -Fq "${expected}"
+    return
+  fi
 
-    location ~* \.(html|json|csv|js|css|png|jpg|jpeg|gif|svg|ico)$ {
-        try_files \$uri =404;
-        add_header Cache-Control "no-cache";
-    }
+  return 0
 }
-EOF
+
+start_static_server() {
+  if pid_is_running "${STATIC_SERVER_PID_FILE}" "${STATIC_PORT}"; then
+    echo "Static HTTP server already running with pid $(cat "${STATIC_SERVER_PID_FILE}")."
   else
-    cat <<EOF | sudo tee "${site_available}" >/dev/null
-server {
-    listen ${STATIC_PORT};
-    server_name ${SERVER_NAME};
-
-    root ${root_value};
-    index index.html sejong_map.html;
-
-    location / {
-        try_files \$uri \$uri/ /index.html;
-    }
-
-    location ~* \.(html|json|csv|js|css|png|jpg|jpeg|gif|svg|ico)$ {
-        try_files \$uri =404;
-        add_header Cache-Control "no-cache";
-    }
-}
-EOF
+    echo "Starting static HTTP server on ${STATIC_BIND_HOST}:${STATIC_PORT}..."
+    nohup "${VENV_PYTHON}" -m http.server "${STATIC_PORT}" \
+      --bind "${STATIC_BIND_HOST}" \
+      --directory "${VISUALIZATION_DIR}" \
+      >> "${STATIC_SERVER_LOG_FILE}" 2>&1 &
+    printf "%s\n" "$!" > "${STATIC_SERVER_PID_FILE}"
   fi
 }
 
-reload_nginx() {
-  sudo_run nginx -t
-  if command -v systemctl >/dev/null 2>&1; then
-    sudo_run systemctl enable nginx >/dev/null 2>&1 || true
-    sudo_run systemctl reload nginx || sudo_run systemctl restart nginx
-  elif command -v service >/dev/null 2>&1; then
-    sudo_run service nginx reload || sudo_run service nginx restart
-  else
-    sudo_run nginx -s reload || sudo_run nginx
+start_cloudflare_tunnel() {
+  if (( CLOUDFLARE_TUNNEL == 0 )); then
+    return
   fi
+  if ! command -v "${CLOUDFLARED_BIN}" >/dev/null 2>&1; then
+    echo "cloudflared not found: ${CLOUDFLARED_BIN}" >&2
+    echo "Install cloudflared, pass --cloudflared PATH, or pass --no-cloudflare-tunnel." >&2
+    exit 1
+  fi
+  if pid_is_running "${CLOUDFLARED_PID_FILE}" "cloudflared"; then
+    echo "Cloudflare Tunnel already running with pid $(cat "${CLOUDFLARED_PID_FILE}")."
+    return
+  fi
+
+  if [[ -n "${CLOUDFLARE_TUNNEL_TOKEN}" ]]; then
+    echo "Starting Cloudflare Tunnel from token..."
+    nohup "${CLOUDFLARED_BIN}" --no-autoupdate tunnel run --token "${CLOUDFLARE_TUNNEL_TOKEN}" \
+      >> "${CLOUDFLARED_LOG_FILE}" 2>&1 &
+  else
+    echo "Starting temporary Cloudflare quick tunnel..."
+    nohup "${CLOUDFLARED_BIN}" --no-autoupdate tunnel --url "http://${STATIC_BIND_HOST}:${STATIC_PORT}" \
+      >> "${CLOUDFLARED_LOG_FILE}" 2>&1 &
+  fi
+  printf "%s\n" "$!" > "${CLOUDFLARED_PID_FILE}"
 }
 
 setup_static_serving() {
-  local site_available
-  local site_enabled
-
-  ensure_sudo_available
-  ensure_nginx_available
   write_visualization_index
-
-  if [[ -d /etc/nginx/sites-available && -d /etc/nginx/sites-enabled ]]; then
-    site_available="/etc/nginx/sites-available/${NGINX_SITE_NAME}"
-    site_enabled="/etc/nginx/sites-enabled/${NGINX_SITE_NAME}"
-    write_nginx_site_config "${site_available}"
-    sudo_run ln -sf "${site_available}" "${site_enabled}"
-  else
-    sudo_run mkdir -p /etc/nginx/conf.d
-    site_available="/etc/nginx/conf.d/${NGINX_SITE_NAME}.conf"
-    write_nginx_site_config "${site_available}"
-  fi
-
-  reload_nginx
+  start_static_server
+  start_cloudflare_tunnel
 }
 
 if (( STATIC_SERVING == 1 )); then
@@ -351,23 +312,26 @@ if (( RUN_INITIAL == 1 )); then
   ) | tee -a "${LOG_FILE}"
 fi
 
-STATIC_HOST="${SERVER_NAME}"
-if [[ "${STATIC_HOST}" == "_" ]]; then
-  STATIC_HOST="<server-ip-or-domain>"
-fi
-STATIC_BASE_URL="http://${STATIC_HOST}:${STATIC_PORT}"
+STATIC_BASE_URL="http://${STATIC_BIND_HOST}:${STATIC_PORT}"
 STATIC_SERVING_SUMMARY="disabled"
 STATIC_URL_LINES=""
 STATIC_CURL_LINE=""
 if (( STATIC_SERVING == 1 )); then
-  STATIC_SERVING_SUMMARY="nginx on ${STATIC_BASE_URL}"
+  STATIC_SERVING_SUMMARY="local HTTP server on ${STATIC_BASE_URL}"
+  if (( CLOUDFLARE_TUNNEL == 1 )); then
+    STATIC_SERVING_SUMMARY="${STATIC_SERVING_SUMMARY}, Cloudflare Tunnel log: ${CLOUDFLARED_LOG_FILE}"
+  fi
   STATIC_URL_LINES=$(cat <<EOF_STATIC
-Static index: ${STATIC_BASE_URL}/
-Static map: ${STATIC_BASE_URL}/sejong_map.html
-Static dashboard: ${STATIC_BASE_URL}/sejong_charts_dashboard.html
+Local static index: ${STATIC_BASE_URL}/
+Local static map: ${STATIC_BASE_URL}/sejong_map.html
+Local static dashboard: ${STATIC_BASE_URL}/sejong_charts_dashboard.html
 EOF_STATIC
 )
   STATIC_CURL_LINE="  curl -I ${STATIC_BASE_URL}/sejong_map.html"
+  if (( CLOUDFLARE_TUNNEL == 1 )) && [[ -z "${CLOUDFLARE_TUNNEL_TOKEN}" ]]; then
+    STATIC_CURL_LINE="${STATIC_CURL_LINE}
+  grep -Eo 'https://[^ ]+\.trycloudflare\.com' ${CLOUDFLARED_LOG_FILE} | tail -1"
+  fi
 fi
 
 cat <<EOF

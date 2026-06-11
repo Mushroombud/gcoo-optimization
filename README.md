@@ -164,11 +164,16 @@ python3 src/run_pipeline.py --snapshot-label now --out outputs/latest_run
 scripts/setup_sejong_tago_cron.sh --interval-minutes 5
 ```
 
-기본 실행은 `outputs/visualizations`를 nginx로 함께 서빙합니다. 기본 포트는 기존 웹서버와의 충돌을 피하기 위해 `8080`입니다.
+기본 실행은 `outputs/visualizations`를 로컬 Python HTTP 서버로 서빙하고 Cloudflare Tunnel로 외부에 노출합니다. 기본 로컬 origin은 `127.0.0.1:8080`입니다.
 
 ```bash
+# Cloudflare Dashboard에서 만든 named tunnel token 사용
+CLOUDFLARE_TUNNEL_TOKEN="..." scripts/setup_sejong_tago_cron.sh --interval-minutes 5 --static-port 8080
+
+# 토큰 없이 임시 trycloudflare.com quick tunnel 사용
 scripts/setup_sejong_tago_cron.sh --interval-minutes 5 --static-port 8080
-scripts/setup_sejong_tago_cron.sh --interval-minutes 5 --static-port 80 --server-name pm.example.com
+
+# 정적 페이지 서빙 없이 수집 cron만 등록
 scripts/setup_sejong_tago_cron.sh --interval-minutes 5 --no-static-serving
 ```
 
@@ -178,7 +183,7 @@ scripts/setup_sejong_tago_cron.sh --interval-minutes 5 --no-static-serving
 OPEN_DATA_PORTAL_API_KEY="..."
 ```
 
-위 값은 `.env` 또는 `--env-file`로 전달한 파일에 있어야 합니다. static serving을 켜는 기본 실행은 `sudo` 권한과 `nginx`가 필요합니다. nginx가 없으면 Debian/Ubuntu 계열 서버에서는 `apt-get`으로 자동 설치를 시도하고, 자동 설치를 막으려면 `--no-nginx-install`을 사용합니다.
+위 값은 `.env` 또는 `--env-file`로 전달한 파일에 있어야 합니다. static serving을 켜는 기본 실행은 `cloudflared` 바이너리가 필요합니다. Docker 컨테이너에서는 nginx나 systemctl을 사용하지 않고, 스크립트가 `python -m http.server`와 `cloudflared tunnel` 프로세스를 백그라운드로 띄웁니다. named tunnel을 쓰는 경우 Cloudflare Public Hostname의 origin service를 `http://127.0.0.1:8080`처럼 `--static-port`와 맞춰 설정하세요.
 
 설정 스크립트가 수행하는 작업:
 
@@ -187,7 +192,7 @@ OPEN_DATA_PORTAL_API_KEY="..."
 3. 세종 TAGO 수집 1회 즉시 실행
 4. rolling 전처리 CSV 및 standalone visualization HTML 생성
 5. 현재 Unix 사용자에 대해 idempotent한 crontab 항목 등록
-6. `outputs/visualizations`를 nginx static root로 등록하고 nginx reload
+6. `outputs/visualizations` 로컬 static server 및 Cloudflare Tunnel 시작
 
 Cron이 호출하는 명령:
 
@@ -223,12 +228,13 @@ outputs/visualizations/sejong_map.html
 outputs/visualizations/sejong_visualization_manifest.json
 ```
 
-nginx static serving을 켠 경우 서버에서 다음 URL로 바로 확인할 수 있습니다.
+static serving을 켠 경우 컨테이너 내부 로컬 origin과 Cloudflare Tunnel URL로 확인할 수 있습니다. quick tunnel URL은 `logs/sejong_tago_cloudflared.log`에 기록됩니다.
 
 ```text
-http://<server-ip-or-domain>:8080/
-http://<server-ip-or-domain>:8080/sejong_map.html
-http://<server-ip-or-domain>:8080/sejong_charts_dashboard.html
+http://127.0.0.1:8080/
+http://127.0.0.1:8080/sejong_map.html
+https://<quick-tunnel>.trycloudflare.com/sejong_map.html
+http://127.0.0.1:8080/sejong_charts_dashboard.html
 ```
 
 cron 작업과 로그 확인:
@@ -308,12 +314,15 @@ q_is = min(
 - `U_max`는 scooter 1대가 하루에 처리할 수 있는 최대 이용 횟수입니다.
 - `lambda_market_validation`을 통해 경쟁사 장치가 많은 zone을 "이미 시장이 검증된 곳"으로 일부 가산할 수 있습니다.
 
-목적함수는 기대 이익 극대화로 잡는 것이 자연스럽습니다.
+목적함수는 기대 이익 극대화로 잡되, 매일 04:00 재배치 비용을 명시적으로 차감합니다.
 
 ```text
 maximize over x:
   E_s [ sum_i ((p_i - variable_cost) * q_is(x_i, c_is) - c_i * x_i) ]
+  - rebalancing_cost_per_scooter_km * estimated_rebalancing_km(x)
 ```
+
+`estimated_rebalancing_km(x)`는 PM 유사 OD 이동이 끝난 뒤 장치가 남아 있을 것으로 추정되는 행정동 분포를 만들고, 다음날 04:00 목표 배치 `x_i`로 되돌리는 데 필요한 총 scooter-km입니다. 현재 구현은 추가 선형계획 의존성을 두지 않기 위해 관측 OD 거리 기반 nearest-surplus matching으로 근사합니다.
 
 세종 pivot에서는 `p_i`를 실제 결제 데이터 없이 직접 관측할 수 없으므로, 평균 이동 거리 또는 평균 이동 시간 proxy로 추정합니다. 초기값은 현재 설정처럼 unlock fee와 분당 요금 가정을 사용하고, 이후 실제 GCOO 요금/정산 데이터가 생기면 `p_i`를 교체합니다.
 
@@ -336,14 +345,14 @@ x_i integer
 | rebalancing budget | 확장 모델에서 `r_ij`를 도입하면 총 재배치 거리/비용 제한 |
 | operator exposure | 특정 경쟁사가 과점한 zone에 대한 최대 노출 또는 risk penalty |
 
-확장 decision variable로는 `r_ij`를 둘 수 있습니다. `r_ij`는 zone `i`에서 zone `j`로 재배치할 scooter 수입니다. 이 경우 목적함수는 재배치 비용을 차감합니다.
+현재 구현은 `r_ij`를 명시 decision variable로 두지는 않지만, 선택된 `x_i`마다 다음 절차로 재배치 비용을 목적함수에 반영합니다.
 
-```text
-maximize:
-  expected_profit(x) - sum_i_j relocation_cost_ij * r_ij
-```
+1. 따릉이 PM 유사 OD에서 `origin_dong_id -> destination_dong_id` 전이확률과 평균 거리를 계산합니다.
+2. `q_is(x_i, c_is)`가 발생한 만큼 영업 종료 후 장치가 목적지 행정동에 남는다고 추정합니다.
+3. 종료 분포의 surplus를 다음날 04:00 목표 배치의 deficit으로 매칭해 `estimated_rebalancing_km`를 계산합니다.
+4. `rebalancing_cost_per_scooter_km`를 곱한 값을 기대 영업이익에서 차감합니다.
 
-이 확장 모델은 "아침 배치 위치"뿐 아니라 "수요가 이동한 뒤 어디로 회수/재배치할지"까지 다룰 수 있습니다. 다만 현재 TAGO만으로는 실제 대여 이벤트를 보지 못하므로, 초기에는 `x_i`만 최적화하고 interval 기반 활동량으로 수요 proxy를 안정화하는 것이 우선입니다.
+향후 정확한 min-cost flow를 쓰려면 `r_ij`를 명시 변수로 두고 `sum_j r_ij`, `sum_i r_ij` 보존 제약을 추가하면 됩니다.
 
 세종 pivot이 적합한 경우:
 
@@ -426,7 +435,8 @@ x_i integer
 | --- | --- |
 | demand support | PM 유사 따릉이 수요가 거의 없는 행정동은 배치 후보에서 제외 |
 | capacity | 실제 PM 관측이 없으므로 `K_i`를 수요 분위수, PM 주차구역, 견인 이벤트, 도로/상권 proxy로 보수적으로 제한 |
-| imbalance penalty | 유출입 차이가 큰 곳은 회수/재배치 비용이 커지므로 `c_i` 증가 |
+| imbalance penalty | 유출입 차이가 큰 곳은 기본 운영비 `c_i` 증가 |
+| AM rebalancing cost | 영업 종료 후 추정 위치에서 다음날 04:00 목표 배치로 옮기는 scooter-km 비용 차감 |
 | district fairness | 특정 구에만 모든 fleet이 몰리지 않도록 구별 최소/최대 비중 설정 가능 |
 | scenario robustness | 특정 날짜 하루가 아니라 여러 operating day 평균 또는 하위 분위 수익에도 견디는 배치 선택 |
 
@@ -602,6 +612,9 @@ python3 src/visualize.py --input outputs/model --out outputs/visualizations --ma
 | `mean_competitor_count` | 행정동별 평균 경쟁사 PM 수 |
 | `mean_gcoo_count` | 행정동별 평균 관측 GCOO PM 수 |
 | `K_i` | 최적화 모델에서 사용한 행정동 용량 |
+| `expected_rebalancing_km` | 영업 종료 추정 분포에서 다음날 04:00 배치로 되돌리는 총 scooter-km |
+| `expected_rebalancing_cost` | `expected_rebalancing_km * rebalancing_cost_per_scooter_km` |
+| `expected_profit_after_rebalancing` | 영업이익에서 재배치 비용을 차감한 목적함수 값 |
 | `B_i` | 도착/출발 기반 불균형 점수 |
 
 ### 6. 브라우저에서 시각화 열기

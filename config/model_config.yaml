@@ -21,6 +21,8 @@ cost:
   variable_cost_per_ride: 300
   base_fixed_cost_per_scooter_day: 2500
   mu_imbalance_cost: 0.5
+  rebalancing_cost_per_scooter_km: 900
+  rebalancing_fallback_distance_km: 2.0
 
 nonlinear_model:
   lambda_market_validation: 0.3
@@ -39,6 +41,7 @@ sensitivity:
   U_values: [4, 6, 8]
   speed_values: [10, 12, 15]
   mu_values: [0.0, 0.5, 1.0]
+  rebalancing_cost_values: [0, 600, 900, 1200, 1800]
 
 data_input:
   paths:
