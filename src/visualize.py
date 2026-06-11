@@ -1344,8 +1344,11 @@ def main() -> None:
     )
     parser.add_argument(
         "--tago-glob",
-        default="data/raw/tago_pm_snapshots_*.csv",
-        help="Raw PM snapshot glob used for point heatmaps when available.",
+        default="data/raw/tago_pm_snapshots_seoul_*.csv",
+        help=(
+            "Raw Seoul PM snapshot glob used for point heatmaps when available. "
+            "The default intentionally avoids Sejong TAGO snapshots."
+        ),
     )
     parser.add_argument(
         "--max-tago-icons",
@@ -1358,6 +1361,7 @@ def main() -> None:
     )
     parser.add_argument("--charts-output", default="charts_dashboard.html")
     parser.add_argument("--map-output", default="seoul_map.html")
+    parser.add_argument("--manifest-output", default="seoul_visualization_manifest.json")
     parser.add_argument("--page-title", default="GCOO Charts")
     parser.add_argument("--zoom-start", type=int, default=13)
     args = parser.parse_args()
@@ -1397,6 +1401,7 @@ def main() -> None:
             for name, df in tables.items()
         },
     }
+    write_json(out_dir / args.manifest_output, manifest)
     write_json(out_dir / "visualization_manifest.json", manifest)
     print(f"charts={charts_path}")
     print(f"map={map_path}")
