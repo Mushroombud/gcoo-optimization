@@ -529,7 +529,6 @@ def add_dong_hover_styles(m: folium.Map) -> None:
 .gcoo-dong-tooltip.leaflet-tooltip {
   background: rgba(255, 255, 255, 0.94);
   border: 1px solid rgba(15, 23, 42, 0.14);
-  border-left: 4px solid #142236;
   border-radius: 8px;
   box-shadow: 0 14px 34px rgba(15, 23, 42, 0.2);
   color: #111827;
@@ -550,7 +549,7 @@ def add_dong_hover_styles(m: folium.Map) -> None:
 }
 .gcoo-tooltip-row {
   display: grid;
-  grid-template-columns: 96px minmax(110px, auto);
+  grid-template-columns: 56px minmax(90px, auto);
   gap: 10px;
 }
 .gcoo-tooltip-key {
@@ -580,6 +579,7 @@ def dong_hover_script(layer_name: str) -> str:
     return f"""
 (function() {{
   const geojsonLayer = {layer_name};
+  let activeTooltip = null;
 
   function escapeHtml(value) {{
     return String(value ?? "")
@@ -598,8 +598,6 @@ def dong_hover_script(layer_name: str) -> str:
         <span class="gcoo-tooltip-value">${{escapeHtml(properties._gcoo_metric)}}</span>
         <span class="gcoo-tooltip-key">Value</span>
         <span class="gcoo-tooltip-value">${{escapeHtml(properties._gcoo_value)}}</span>
-        <span class="gcoo-tooltip-key">Boundary</span>
-        <span class="gcoo-tooltip-value">${{escapeHtml(properties._gcoo_source)}}</span>
       </div>
     `;
   }}
@@ -642,21 +640,40 @@ def dong_hover_script(layer_name: str) -> str:
     return best;
   }}
 
+  function closeActiveTooltip() {{
+    const map = geojsonLayer._map;
+    if (activeTooltip && map) {{
+      map.removeLayer(activeTooltip);
+    }}
+    activeTooltip = null;
+  }}
+
+  function openAnchoredTooltip(featureLayer, properties) {{
+    const map = geojsonLayer._map;
+    const anchor = edgeAnchor(featureLayer);
+    if (!map || !anchor) {{
+      return;
+    }}
+
+    closeActiveTooltip();
+    activeTooltip = L.tooltip({{
+      className: "gcoo-dong-tooltip",
+      direction: "right",
+      offset: [14, 0],
+      opacity: 1,
+      permanent: true,
+      interactive: false,
+    }})
+      .setLatLng(anchor)
+      .setContent(tooltipHtml(properties))
+      .addTo(map);
+  }}
+
   geojsonLayer.eachLayer(function(featureLayer) {{
     const properties = featureLayer.feature && featureLayer.feature.properties;
     if (!properties) {{
       return;
     }}
-
-    featureLayer.bindTooltip(tooltipHtml(properties), {{
-      className: "gcoo-dong-tooltip",
-      direction: "right",
-      offset: [14, 0],
-      opacity: 1,
-      permanent: false,
-      sticky: false,
-      interactive: false,
-    }});
 
     featureLayer.on("mouseover", function() {{
       this.setStyle({{
@@ -668,14 +685,11 @@ def dong_hover_script(layer_name: str) -> str:
       if (this.bringToFront) {{
         this.bringToFront();
       }}
-      const anchor = edgeAnchor(this);
-      if (anchor) {{
-        this.openTooltip(anchor);
-      }}
+      openAnchoredTooltip(this, properties);
     }});
 
     featureLayer.on("mouseout", function() {{
-      this.closeTooltip();
+      closeActiveTooltip();
       geojsonLayer.resetStyle(this);
     }});
   }});

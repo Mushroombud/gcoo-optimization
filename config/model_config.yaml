@@ -52,7 +52,7 @@ data_input:
       rows_per_page: 1000
       max_pages: 10
     tago_pm:
-      base_url: http://apis.data.go.kr/1613000/PersonalMobilityInfo
+      base_url: https://apis.data.go.kr/1613000/PersonalMobilityInfo
       provider_operation: GetPMProvider
       list_operation: GetPMListByProvider
       target_city_name: 서울

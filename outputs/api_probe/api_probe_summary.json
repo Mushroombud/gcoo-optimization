@@ -25,7 +25,7 @@
   },
   {
     "name": "tago_personal_mobility",
-    "url": "http://apis.data.go.kr/1613000/PersonalMobilityInfo/GetPMProvider?numOfRows=1000&pageNo=1&_type=json&serviceKey=***",
+    "url": "https://apis.data.go.kr/1613000/PersonalMobilityInfo/GetPMProvider?numOfRows=1000&pageNo=1&_type=json&serviceKey=***",
     "status_code": 200,
     "response_format": "json",
     "ok": true,

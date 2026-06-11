@@ -28,7 +28,7 @@ Observed field paths:
 
 ### tago_personal_mobility
 
-- URL: `http://apis.data.go.kr/1613000/PersonalMobilityInfo/GetPMProvider?numOfRows=1000&pageNo=1&_type=json&serviceKey=***`
+- URL: `https://apis.data.go.kr/1613000/PersonalMobilityInfo/GetPMProvider?numOfRows=1000&pageNo=1&_type=json&serviceKey=***`
 - HTTP status: `200`
 - Response format: `json`
 - Usable response: `True`

@@ -15,8 +15,8 @@ from common import load_dotenv
 
 
 SEOUL_BIKE_URL_TEMPLATE = "http://openapi.seoul.go.kr:8088/{key}/json/bikeList/1/5/"
-TAGO_PM_PROVIDER_URL = "http://apis.data.go.kr/1613000/PersonalMobilityInfo/GetPMProvider"
-TAGO_PM_LIST_URL = "http://apis.data.go.kr/1613000/PersonalMobilityInfo/GetPMListByProvider"
+TAGO_PM_PROVIDER_URL = "https://apis.data.go.kr/1613000/PersonalMobilityInfo/GetPMProvider"
+TAGO_PM_LIST_URL = "https://apis.data.go.kr/1613000/PersonalMobilityInfo/GetPMListByProvider"
 
 
 @dataclass
