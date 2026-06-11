@@ -1,0 +1,330 @@
+parking_id,gu_name,address,detail_location,has_stand,source_service
+1.0,종로구,팔판동 115-63 ,청와대 춘추문 맞은편,Y,parkingKickboard
+2.0,종로구,연건동 218-1,KT 광화문 혜화지사 앞,Y,parkingKickboard
+3.0,종로구,연건동 178-3 ,홍익대학교 대학로 맞은편,Y,parkingKickboard
+4.0,종로구,동승동 1-24,대학로 마로니에 공원 앞,Y,parkingKickboard
+5.0,종로구,와룡동 75-4,연악사 맞은편,Y,parkingKickboard
+6.0,종로구,명륜4가 96-4,흥사단 동숭 미술관 맞은편,Y,parkingKickboard
+7.0,종로구,소격동 165-5,국립현대미술관 ,Y,parkingKickboard
+8.0,종로구,신문로1가 5-4 ,새문안교회 앞,Y,parkingKickboard
+9.0,종로구,신문로 2가 58,(구)경찰박물관 앞,Y,parkingKickboard
+10.0,종로구,무악동 41-7 ,무악현대아파트 앞,Y,parkingKickboard
+11.0,종로구,사직동 45-4 ,사직공원 맞은편,Y,parkingKickboard
+12.0,종로구,내자동 186-3 ,서울경찰청 민원봉사실 앞,Y,parkingKickboard
+13.0,종로구,적선동 8-1 ,경복궁역 4번출구 근처,Y,parkingKickboard
+14.0,종로구,세종로 84-8 ,광화문역 2번 출구 근처,Y,parkingKickboard
+15.0,종로구,공평동 100-19 ,종각역 2번 출구 근처,Y,parkingKickboard
+16.0,종로구,서린동 26-1 ,종각역 5번 출구 근처,Y,parkingKickboard
+17.0,종로구,종로2가 84-11 ,YBM 어학원 앞,Y,parkingKickboard
+18.0,중구,중구 을지로 178,을지로4가역 9~10번 출구,Y,parkingKickboard
+19.0,중구,중구 을지로 2가 206,IBK파이낸스타워 출입구 앞,Y,parkingKickboard
+20.0,중구,중구 을지로 42,을지로입구역 7번 출구,Y,parkingKickboard
+21.0,중구,중구 을지로 50,을지로입구역 6번 출구,Y,parkingKickboard
+22.0,용산구,이태원동 127-6,이태원역 3번출구,Y,parkingKickboard
+23.0,용산구,용문동 5-157,효창공원앞역 5번출구,Y,parkingKickboard
+24.0,용산구,갈월동 92,남영삼거리 (용산빌딩 앞),Y,parkingKickboard
+25.0,용산구,용산구 갈월동 69-29,숙대입구역 10번출구,N,parkingKickboard
+26.0,성동구,홍익동 614-1,상왕십리역 1번출구,Y,parkingKickboard
+27.0,성동구,성수동1가 656-302,뚝섬역 1번출구,Y,parkingKickboard
+28.0,성동구,옥수동 401-1,옥수역 1번출구,Y,parkingKickboard
+29.0,성동구,금호동4가 1470-1,금호역 3번출구,Y,parkingKickboard
+30.0,성동구,금호동3가 1583,금호역 4번출구,Y,parkingKickboard
+31.0,성동구,행당동 산17,한양대역 3번출구,Y,parkingKickboard
+32.0,광진구, 자양동 854,자양역 1번출구 인근,N,parkingKickboard
+33.0,동대문구,장안동 416-10,창도빌딩 앞(지하철 환풍구 옆 가로등 가로수 사이),N,parkingKickboard
+34.0,동대문구,답십리동 497-23,천호대로 257 청계푸르지오시티오피스텔 앞,N,parkingKickboard
+35.0,동대문구,신설동 98-32,신설동역 5번출구 뒤 자전거보관대 옆(파리바게트 앞),N,parkingKickboard
+36.0,동대문구,휘경동 255-4,회기로 195 셰계주류마켓 앞 보도,N,parkingKickboard
+37.0,동대문구,전농동 687,도미노피자 전농점 앞,N,parkingKickboard
+38.0,동대문구,전농동 591-53,청량리역광장 서울청년센터 동대문오랑 앞,N,parkingKickboard
+39.0,동대문구,이문동 329-1,스타벅스 외대정문점 앞,N,parkingKickboard
+40.0,동대문구,전농동 295-53,우리은행 전농동지점 앞,N,parkingKickboard
+41.0,동대문구,장안동 307-6,투썸플레이스 장안동 사거리점 앞,N,parkingKickboard
+42.0,동대문구,휘경동 267-10,에스오일주유소 앞 따릉이대여소 옆,N,parkingKickboard
+43.0,동대문구,전농동 103-340,시티프라자 앞,N,parkingKickboard
+44.0,동대문구,용두동 47-1,LG전자베스트샵 주차장 앞 보도,N,parkingKickboard
+45.0,동대문구,장안동 368-1,아트몰링 장안점 앞,N,parkingKickboard
+46.0,동대문구,전농동 10,베스킨라빈스 전농점 앞,N,parkingKickboard
+47.0,중랑구,중화동 73-7,중랑역 2번출구 ,Y,parkingKickboard
+48.0,성북구,성북구 석관동 375-54,석계역 7번출구 우측,Y,parkingKickboard
+49.0,성북구,성북구 월곡동 37-4,월곡역 3번 출구 좌측,Y,parkingKickboard
+50.0,성북구,성북구 종암동 3-1288,종암박스파크 북서측,Y,parkingKickboard
+51.0,성북구,길음동 877-66,길음역 3번 출구 뒷편,N,parkingKickboard
+52.0,강북구,수유동  230-10,수유역  5번  출구  앞,N,parkingKickboard
+53.0,강북구,미아동  125-33,미아역  4번  출구  앞,N,parkingKickboard
+54.0,강북구,미아동  134-39,이디야커피 미아중앙점 앞,N,parkingKickboard
+55.0,강북구,미아동  160-14,얼맥당  수유점  앞,N,parkingKickboard
+56.0,강북구,번동  418-9,수유역  1번  출구  앞,N,parkingKickboard
+57.0,강북구,미아동  190-1,아름다운가게  미아점  앞,N,parkingKickboard
+58.0,강북구,번동  449-1,롯데시네마  수유관  앞,N,parkingKickboard
+59.0,강북구,수유동  183-4,청년치킨  수유점  앞,N,parkingKickboard
+60.0,도봉구,창동723-11,창동 메가박스 앞,Y,parkingKickboard
+61.0,도봉구,쌍문동 83-4,크로커다일 앞,Y,parkingKickboard
+62.0,도봉구,방학동 710,평화도봉공원,Y,parkingKickboard
+63.0,노원구,화랑로510,화랑대역 2번출구 앞,N,parkingKickboard
+64.0,노원구,공릉로232,서울과학기술대 정문 앞(좌),N,parkingKickboard
+65.0,노원구,공릉로232,서울과학기술대 정문 앞(우),N,parkingKickboard
+66.0,노원구,동일로 1078,공릉역 1번출구 노랑통닭 앞,N,parkingKickboard
+67.0,노원구,하계동 273-3,하계 어린이 공원,N,parkingKickboard
+68.0,노원구,동일로 1015,스타벅스 공릉DT점,N,parkingKickboard
+69.0,노원구,동일로1308-1,중계역 2번출구,N,parkingKickboard
+70.0,노원구,상계동 611-1,노원역 운전면허시험장 사거리(1),N,parkingKickboard
+71.0,노원구,상계동 611-1,노원역 운전면허시험장 사거리(2),N,parkingKickboard
+72.0,노원구,동일로1530-1,마들역 5번출구,N,parkingKickboard
+73.0,노원구,동일로 1673,수락산역 4번출구 파크랜드 앞,N,parkingKickboard
+74.0,노원구,동일로 1608,채선당 도시락&샐러드 마들점,N,parkingKickboard
+75.0,노원구,동일로1530-1,마들역 8번출구 우리은행 앞,N,parkingKickboard
+76.0,노원구,노해로502,KT 노원지사 스타벅스 앞 ,N,parkingKickboard
+77.0,노원구,동일로1308-1,중계역 5번출구,N,parkingKickboard
+78.0,노원구,상계로301-1,당고개역 뒤 사나포차 앞,N,parkingKickboard
+79.0,노원구,월계동 56-5,석계역 광장 따릉이 옆,N,parkingKickboard
+80.0,노원구,석계로 98-2,광운대역 앞 스타벅스 앞,N,parkingKickboard
+81.0,노원구,동일로 1014,골드퍼피 동물메디컬 센터 앞,N,parkingKickboard
+82.0,노원구,동일로1074,공릉역 3번출구 따릉이 옆,N,parkingKickboard
+83.0,노원구,동일로1074,공릉역 4번출구 스타벅스 앞,N,parkingKickboard
+84.0,노원구,동일로 1114,수협은행 공릉점 앞,N,parkingKickboard
+85.0,노원구,동일로1196,하계역 1번출구 인근,N,parkingKickboard
+86.0,노원구,동일로1196,하계역 6번출구 따릉이 옆,N,parkingKickboard
+87.0,노원구,노해로 507,와우쇼핑몰 앞,N,parkingKickboard
+88.0,노원구,동일로1456,온수골 사거리 주공 715동 앞,N,parkingKickboard
+89.0,노원구,동일로242길 5 ,수락문 평양칼국수 앞,N,parkingKickboard
+90.0,노원구,공릉동 678-1,태릉입구역 1 ~2번출구 현대자동차 앞,N,parkingKickboard
+91.0,노원구,중계동 434-1,상계동 뚜레주르 앞,N,parkingKickboard
+92.0,노원구,상계로23가길 24,상계중앙시장 앞 따릉이 옆 (상계역삼창프라자건너편),N,parkingKickboard
+93.0,노원구,동일로 1662,수락산역 3번출구  르노코리아 상계대리점 앞,N,parkingKickboard
+94.0,노원구,중계동 503-3,중계역 4번출구 ,N,parkingKickboard
+95.0,노원구,노해로 452,노원역 6번출구 탑티어커피 앞,N,parkingKickboard
+96.0,노원구,하계동 284-2,하계역 2번출구,N,parkingKickboard
+97.0,노원구,하계동 284-2,하계역 3번출구,N,parkingKickboard
+98.0,은평구,은평구 녹번동 282,녹번동 282,N,parkingKickboard
+99.0,은평구,은평구 불광동 274-12,불광동 274-12,N,parkingKickboard
+100.0,서대문구,서대문구 창천동 30-8 ,2호선신촌역 2번출구,N,parkingKickboard
+101.0,마포구,대흥동 105-47,대흥역 1번출구 앞,N,parkingKickboard
+102.0,마포구,성산동 592-6,마포구청역 2번출구 앞,N,parkingKickboard
+103.0,마포구,아현동 329-15,아현역 4번출구,N,parkingKickboard
+104.0,마포구,망원동 377-18,망원역2번출구(이니스프리앞),N,parkingKickboard
+105.0,마포구,공덕동255-10,공덕역 5번 출구(엘리베이터앞),N,parkingKickboard
+106.0,마포구,창전동 146-6,광흥창역 5번 출구 인근(한국조폐공사앞),N,parkingKickboard
+107.0,마포구,노고산동 57-2,신촌역 7번출구 계단뒷편 스파오앞,N,parkingKickboard
+108.0,마포구,아현동 607-1,애오개역 4번 출구(화단앞),N,parkingKickboard
+109.0,마포구,대흥동 2-6,이대역 5번 출구(화단앞),N,parkingKickboard
+110.0,마포구,성산동 266-1,마포구청역 4번 출구(LG전자앞),N,parkingKickboard
+111.0,마포구,합정동 472,마포한강푸르지오앞,N,parkingKickboard
+112.0,마포구,서교동490,합정역9번출구,N,parkingKickboard
+113.0,마포구,서교동490,합정역10번출구,N,parkingKickboard
+114.0,마포구,동교동 155-27,효성홍익인간오피스텔 (홍익대입구역3번),N,parkingKickboard
+115.0,마포구,동교동 167-29,다이소 (홍익대입구역4번),N,parkingKickboard
+116.0,마포구,동교동 166-13,홍익대입구역8번출구,N,parkingKickboard
+117.0,양천구,목동동로 151,서울출입국 외국인청 입구,Y,parkingKickboard
+118.0,양천구,신정동 322-3,햇빛문고 앞,Y,parkingKickboard
+119.0,양천구,신정동 322-4,양천문화회관 앞,Y,parkingKickboard
+120.0,양천구,신정동 324-4,한사랑교회 앞,Y,parkingKickboard
+121.0,강서구,마곡동 727-1222,발산역 8번 출구,Y,parkingKickboard
+122.0,강서구,마곡동 727-1428,마곡역 3번출구,N,parkingKickboard
+123.0,강서구,마곡동 728-163,마곡역 6번 출구,Y,parkingKickboard
+124.0,강서구,마곡동 721-4,마곡역 5번 출구,Y,parkingKickboard
+125.0,강서구,마곡동 799,마곡역 4번 출구,Y,parkingKickboard
+126.0,강서구,마곡중앙5로 6,마곡나루역 1번 출구,Y,parkingKickboard
+127.0,강서구,마곡중앙5로 6,나루역 2번 출구,Y,parkingKickboard
+128.0,강서구,마곡동 767,마곡광장 입구,Y,parkingKickboard
+129.0,강서구,마곡동 728-190,마곡나루역 4번 출구,Y,parkingKickboard
+130.0,강서구,마곡동 727-1221,발산역 1번 출구/출구 바로 앞 따릉이 거치대 맞은편,Y,parkingKickboard
+131.0,강서구,등촌동 673,"발산역 3,4번 출구 사이/출구 사이 엘리베이터 측면",Y,parkingKickboard
+132.0,강서구,등촌동 673-1,발산역 4번 출구/자전거 거치대 끝나는 부근,Y,parkingKickboard
+133.0,강서구,화곡로 416,가양역 7번출구,N,parkingKickboard
+134.0,강서구,등촌동 78-7,가양역 8번 출구 앞,Y,parkingKickboard
+135.0,강서구,등촌동 666-2,"가양역 6, 7번 출구 사이",Y,parkingKickboard
+136.0,강서구,등촌동 648-4,등촌역 1번 출구,Y,parkingKickboard
+137.0,강서구,가양동 449-30,증미역 1번 출구,Y,parkingKickboard
+138.0,강서구,가양동 449-30,증미역 2번 출구,Y,parkingKickboard
+139.0,강서구,가양동 449-30,"증미역 1,2번 출구 사이",Y,parkingKickboard
+140.0,강서구,마곡동 727-1428,마곡역 1번 출구,Y,parkingKickboard
+141.0,강서구,공항대로 지하 163,마곡역 2번 출구,Y,parkingKickboard
+142.0,강서구,방화동 830-8,방화역 1번 출구,Y,parkingKickboard
+143.0,강서구,공항대로 571,등촌역 3번 출구 부근,Y,parkingKickboard
+144.0,강서구,등촌동 505-3,등촌역 8번 출구,Y,parkingKickboard
+145.0,강서구,마곡동 767-3,마곡나루역 5번 출구,Y,parkingKickboard
+146.0,강서구,마곡동 776-2,양천향교역 8번 출구,Y,parkingKickboard
+147.0,구로구,구로동 603-13,구로역3번출구  앞,Y,parkingKickboard
+148.0,구로구,신도림동 347-20,신도림역1번출구  앞,Y,parkingKickboard
+149.0,구로구,구로동 188-15,구로G밸리비즈플라자  앞,Y,parkingKickboard
+150.0,금천구,시흥동 113-82,금천구청 M타워 인근,Y,parkingKickboard
+151.0,금천구,가산동 714-2,독산역 2번 출구 인근,Y,parkingKickboard
+152.0,금천구,가산동 670-2 ,대륭테크노 18차  앞,Y,parkingKickboard
+153.0,금천구,가산동 60-5 ,갑을그레이트밸리  앞,Y,parkingKickboard
+154.0,금천구,가산동 50-3, 대륭포스트타워6  앞,Y,parkingKickboard
+155.0,금천구,독산동 1099, 한신아파트 앞,Y,parkingKickboard
+156.0,금천구,독산동 1160-5, 롯데캐슬 앞,Y,parkingKickboard
+157.0,금천구,가산동 677, 가산디지털 엠파이어 앞,Y,parkingKickboard
+158.0,금천구,가산동 670-2, 대륭테크노타운18차 앞,Y,parkingKickboard
+159.0,금천구,가산동 371-27, 롯데택배 앞,Y,parkingKickboard
+160.0,금천구,가산동 60-35, 수출의 다리 하부,Y,parkingKickboard
+161.0,금천구,가산동 60-35,현대아울렛 앞,Y,parkingKickboard
+162.0,금천구,독산동 996-9,문성초등학교 앞,Y,parkingKickboard
+163.0,금천구,독산동 995-6,독산3동 주민센터 앞,Y,parkingKickboard
+164.0,금천구,가산동 60-15,가디역 6번 출구 뒤편,N,parkingKickboard
+165.0,금천구,가산동 757,독산역 2번 출구 인근,N,parkingKickboard
+166.0,금천구,시흥동 1020,금천구청 따릉이 대여소 인근,N,parkingKickboard
+167.0,금천구,시흥동 984,금천고버스정류장 (18534) 인근,N,parkingKickboard
+168.0,동작구,본동  344-10,노들역 1번 출구 측면,N,parkingKickboard
+169.0,동작구,상도동  511,숭실대입구 3번출구 ,N,parkingKickboard
+170.0,동작구,대방동  356-2,공군호텔 버스정류소(20107) 인근,N,parkingKickboard
+171.0,관악구,봉천동 869-1,서울대입구역 4번 출구 인근,N,parkingKickboard
+172.0,관악구,남부순환로 1805,서울대입구역 5번 출구 인근,N,parkingKickboard
+173.0,관악구,남부순환로 1900,낙성대입구 교차로 인근,N,parkingKickboard
+174.0,관악구,남부순환로 1950,낙성대역 버스정류소 주변,N,parkingKickboard
+175.0,관악구,남부순환로 1710,봉천역 3번 출구 인근,N,parkingKickboard
+176.0,서초구,서초동 1374,대륭서초타워 앞,N,parkingKickboard
+177.0,서초구,서초동 1374,현대렉시온 앞,N,parkingKickboard
+178.0,서초구,서초동 1375,샐러디 양재역점 앞,N,parkingKickboard
+179.0,서초구,서초동 1720-11,대검찰청 건너편,N,parkingKickboard
+180.0,서초구,서초동 1582-12,교대입구 삼거리,N,parkingKickboard
+181.0,서초구,잠원동 87-1,논현역 8번출구,N,parkingKickboard
+182.0,서초구,반포동 706-8,논현역 6번출구,N,parkingKickboard
+183.0,서초구,반포동 18-1,신반포역 3번출구,N,parkingKickboard
+184.0,서초구,방배동 3160,총신대입구역 2번출구,N,parkingKickboard
+185.0,서초구,서초동 1673-11,교대역 1번출구,N,parkingKickboard
+186.0,서초구,서초동 1748-17,서초역 1번출구,N,parkingKickboard
+187.0,서초구,서초동 1715-15,교대역 10번출구,N,parkingKickboard
+188.0,서초구,서초동 1541-43,서초역 4번출구,N,parkingKickboard
+189.0,서초구,서초동 1732-11,서초역 5번출구,N,parkingKickboard
+190.0,서초구,서초동 1542-1,서초역 2번출구,N,parkingKickboard
+191.0,서초구,서초동 1374,삼성화재 서초사옥 앞,N,parkingKickboard
+192.0,서초구,반포동 749-18,신논현역 2번출구,N,parkingKickboard
+193.0,서초구,서초동 1321-40,강남빌딩 앞,N,parkingKickboard
+194.0,서초구,서초동711-4,예술의 전당 앞,N,parkingKickboard
+195.0,서초구,서초동 산 150-124,국립국악원 앞,N,parkingKickboard
+196.0,서초구,서초동 산 150-124,국립국악원 앞,N,parkingKickboard
+197.0,서초구,서초동 산 150-124,국립국악원 앞,N,parkingKickboard
+198.0,서초구,서초동 1445-17,남부터미널역 4-1번 출구,N,parkingKickboard
+199.0,서초구,서초동1445-17,남부터미널역 4번출구,N,parkingKickboard
+200.0,서초구,서초동1655-6,서울교대 앞,N,parkingKickboard
+201.0,서초구,서초동1598-4,교대사거리,N,parkingKickboard
+202.0,서초구,서초동1748-38,서초3동 사거리,N,parkingKickboard
+203.0,서초구,반포동117-3,고속터미널 5번출구,N,parkingKickboard
+204.0,서초구,반포동 128-6,반포역 2번출구,N,parkingKickboard
+205.0,서초구,반포동 19-3,고속터미널역 8번출구,N,parkingKickboard
+206.0,서초구,방배동1823,이수역 1번출구,N,parkingKickboard
+207.0,서초구,방배동 438-34,이수역 6번출구,N,parkingKickboard
+208.0,서초구,방배동874-16,내방역 6번출구,N,parkingKickboard
+209.0,서초구,방배동149,내방역 3번출구,N,parkingKickboard
+210.0,서초구,방배동444-9,사당역 13번출구,N,parkingKickboard
+211.0,서초구,서초동 1375,양재역 2번출구,N,parkingKickboard
+212.0,서초구,양재동 13-4,양재역 7번출구,N,parkingKickboard
+213.0,서초구,양재동 24,양재역 9번출구,N,parkingKickboard
+214.0,서초구,서초동 1376-8,양재역 10번출구,N,parkingKickboard
+215.0,서초구,서초동 1366-12,양재역 1번출구,N,parkingKickboard
+216.0,서초구,양재동67-10,교육개발원 입구 사거리,N,parkingKickboard
+217.0,서초구,양재동20-41,교육개발원 입구 사거리,N,parkingKickboard
+218.0,서초구,양재동 237-2,양재시민의숲역 1번출구,N,parkingKickboard
+219.0,서초구,서초동1377-1,서초1교,N,parkingKickboard
+220.0,서초구,서초동1418,서초3교,N,parkingKickboard
+221.0,서초구,양재동232,AT센터 앞,N,parkingKickboard
+222.0,서초구,서초동1319-1,강남역 7번출구,N,parkingKickboard
+223.0,서초구,서초동1319-1,강남역 8번출구,N,parkingKickboard
+224.0,서초구,반포동 30-5,사평역2번 출구,N,parkingKickboard
+225.0,강남구,논현동 119,강남구청역 3번 출구,N,parkingKickboard
+226.0,강남구,논현동 88-1,학동역 9번 출구,N,parkingKickboard
+227.0,강남구,삼성동 1,강남구청역 1번 출구,N,parkingKickboard
+228.0,강남구,삼성동 145,삼성중앙역 5번 출구,N,parkingKickboard
+229.0,강남구,삼성동 52,청담역 6번 출구,N,parkingKickboard
+230.0,강남구,신사동 501-2,신사역 7번 출구,N,parkingKickboard
+231.0,강남구,역삼동 679-5,역삼역 8번 출구,N,parkingKickboard
+232.0,강남구,청담동 41-2,강남구청역 4번 출구,N,parkingKickboard
+233.0,강남구,청담동 76-4,청담역 9번 출구,N,parkingKickboard
+234.0,강남구,압구정로 161,강남관광정보센터 앞,N,parkingKickboard
+235.0,강남구,압구정로 206,와이비엠에듀 지사 앞,N,parkingKickboard
+236.0,강남구,압구정로 342,언더아머 압구정점 앞,N,parkingKickboard
+237.0,강남구,도산대로 138,우리은행 신사동프리미엄금융센터 앞,N,parkingKickboard
+238.0,강남구,도산대로 318 ,SBS타워 앞,N,parkingKickboard
+239.0,강남구,학동로 165,마일스디오빌 본죽 비빔밥 앞,N,parkingKickboard
+240.0,강남구,학동로 170 ,KT매장 앞,N,parkingKickboard
+241.0,강남구,논현로 704,학동역 8번 출구,N,parkingKickboard
+242.0,강남구,논현로 665,학동역 4번 출구,N,parkingKickboard
+243.0,강남구,학동로 171,학동역 6번 출구,N,parkingKickboard
+244.0,강남구,강남대로 566,신영와코루빌딩 앞,N,parkingKickboard
+245.0,강남구,강남대로 536,"논현역 3번 출구, 자생한방병원 앞",N,parkingKickboard
+246.0,강남구,강남대로 530,미사랑빌딩 앞,N,parkingKickboard
+247.0,강남구,봉은사로 116 ,닥터포헤어와 반디빌딩 사이,N,parkingKickboard
+248.0,강남구,봉은사로 446 ,스타벅스 봉은사로선정릉점 앞,N,parkingKickboard
+249.0,강남구,봉은사로 607,리드빌딩 앞,N,parkingKickboard
+250.0,강남구,봉은사로 606,봉은사역 5번 출구,N,parkingKickboard
+251.0,강남구,테헤란로 101 ,강남역 강남스퀘어 광장,N,parkingKickboard
+252.0,강남구,테헤란로 152,역삼역 2번 출구,N,parkingKickboard
+253.0,강남구,테헤란로 240,역삼 지하보도 4번 출구,N,parkingKickboard
+254.0,강남구,테헤란로 242,역삼 지하보도 3번 출구 측면,N,parkingKickboard
+255.0,강남구,테헤란로 302,역삼 지하보도 2번 출구 측면,N,parkingKickboard
+256.0,강남구,테헤란로 305,한국산업기술진흥원 앞,N,parkingKickboard
+257.0,강남구,테헤란로 443 ,스타벅스 삼성점 앞,N,parkingKickboard
+258.0,강남구,테헤란로 103,강남역 12번 출구 뒤편,N,parkingKickboard
+259.0,강남구,테헤란로 447,범무법인 안팍 서울 주사무소 앞,N,parkingKickboard
+260.0,강남구,테헤란로 501,IBK 기업은행 앞,N,parkingKickboard
+261.0,강남구,테헤란로 503,송영욱 내과의원 앞,N,parkingKickboard
+262.0,강남구,테헤란로 440,포스코 사거리 포스코센터 앞,N,parkingKickboard
+263.0,강남구,테헤란로 504,포스코 사거리 유진저축은행 앞,N,parkingKickboard
+264.0,강남구,테헤란로 505,스타벅스 포스코사거리점 앞,N,parkingKickboard
+265.0,강남구,테헤란로 606,봉은사역 5번출구 우측,N,parkingKickboard
+266.0,강남구,영동대로 316 ,새마을운동중앙회 앞,N,parkingKickboard
+267.0,강남구,영동대로 302 ,국민제1빌딩 현대자동차 앞,N,parkingKickboard
+268.0,강남구,영동대로 237 ,삼성디지털프라자 앞,N,parkingKickboard
+269.0,강남구,영동대로 301 ,BMW 삼성전시장 앞,N,parkingKickboard
+270.0,강남구,도곡로 331 ,한티역 8번 출구 뒤,N,parkingKickboard
+271.0,강남구,도곡로 404,한티역 4번 출구,N,parkingKickboard
+272.0,강남구,선릉로 206,도곡역 2번 출구 측면,N,parkingKickboard
+273.0,강남구,삼성로 155,대치역 7번 출구,N,parkingKickboard
+274.0,강남구,일원동 128-10 ,삼성서울병원 정문 주변,N,parkingKickboard
+275.0,강남구,일원로 115,일원역 3번 출구,N,parkingKickboard
+276.0,강남구,일원로 127,"일원역 4, 5번 출구 사이",N,parkingKickboard
+277.0,강남구,수서동 724-4,수서역 5번 출구 측면,N,parkingKickboard
+278.0,강남구,수서동 727,수서역 6번 출구,N,parkingKickboard
+279.0,강남구,자곡로 218 ,자곡동사거리 남동측,N,parkingKickboard
+280.0,강남구,자곡로 210 ,더샵갤러리 앞,N,parkingKickboard
+281.0,강남구,자곡로3길 22 ,세곡중학교 앞 삼거리,N,parkingKickboard
+282.0,강남구,헌릉로590길 100,강남신동아파밀리에2단지 정류장,N,parkingKickboard
+283.0,강남구,테헤란로 508,해성2빌딩 앞,N,parkingKickboard
+284.0,송파구,가락동 10-15,오금역 4번 출구,N,parkingKickboard
+285.0,송파구,가락동 10-15,경찰병원역 1번 출구 뒤,N,parkingKickboard
+286.0,송파구,신천동 19,몽촌토성역 4번 출구 앞,N,parkingKickboard
+287.0,송파구,송파동 1-1,석촌역 4번 출구 뒤,N,parkingKickboard
+288.0,송파구,잠실동 270,"잠실새내역 3, 4번 출구 사이",N,parkingKickboard
+289.0,송파구,방이동 89-28,올림픽공원역 4번 출구 측면,Y,parkingKickboard
+290.0,송파구,잠실동 50,종합운동장역 4번 출구 앞,Y,parkingKickboard
+291.0,송파구,신천동 29-5,송파구청 앞,Y,parkingKickboard
+292.0,송파구,신청동 28,잠실역 2번출구 앞,Y,parkingKickboard
+293.0,송파구,잠실동 39,잠실역 3번출구 앞,Y,parkingKickboard
+294.0,송파구,잠실동 39,잠실역 4번 출구,Y,parkingKickboard
+295.0,송파구,잠실동 35-8,잠실새내역 1번출구 앞,Y,parkingKickboard
+296.0,송파구,잠실동 84,종합운동장역 9번 출구 앞,Y,parkingKickboard
+297.0,송파구,신천동 15,잠실나루역 1번 출구 앞,Y,parkingKickboard
+298.0,송파구,방이동 44-12,몽촌토성역 3번 출구 앞,Y,parkingKickboard
+299.0,송파구,방이동 89-27,올림픽공원역 3번 출구 앞,Y,parkingKickboard
+300.0,송파구,잠실역 46,석촌호수 서호 입구,Y,parkingKickboard
+301.0,송파구,오금동 165-1,개롱역 2번출구 앞,Y,parkingKickboard
+302.0,송파구,오금동 165-1,개롱역 2번출구 앞,Y,parkingKickboard
+303.0,송파구,가락동 165-2,개롱역 3번출구 앞,Y,parkingKickboard
+304.0,송파구,가락동 165-3,개롱역 4번출구,Y,parkingKickboard
+305.0,송파구,방이동 88-17,몽촌토성역 1번 출구 근처,N,parkingKickboard
+306.0,송파구,방이동 88-17,한성백제역 2번 출구 근처,Y,parkingKickboard
+307.0,송파구,송파동 68,석촌역 2번 출구 뒤쪽,Y,parkingKickboard
+308.0,송파구,석촌동 318,석촌역 6번 출구 인근,Y,parkingKickboard
+309.0,송파구,잠실동 21,잠실새내역 7번 출구 뒤쪽,Y,parkingKickboard
+310.0,송파구,문정동 634,장지역 3번 출구 따릉이 옆,Y,parkingKickboard
+311.0,송파구,법원로 128,문정역 4번 출구 앞,N,parkingKickboard
+312.0,송파구,올림픽로 336,잠실 대우 유토피아건물 앞,N,parkingKickboard
+313.0,강동구,명일동 46-5,고덕역 4번출구 인근 ,N,parkingKickboard
+314.0,강동구,명일동 303-1,명일역 2번출구 인근 ,N,parkingKickboard
+315.0,강동구,암사동 524,선사고등학교 앞 ,Y,parkingKickboard
+316.0,강동구,강일동 679-6,강동공영차고지 버스정류장 인근 ,Y,parkingKickboard
+317.0,강동구,강일동 681,육교 아래 ,Y,parkingKickboard
+318.0,마포구,마포구 월드컵로3길 1,마포한강2차푸르지오아파트 앞마포한강2차푸르지오아파트 앞,N,parkingKickboard
+319.0,마포구,마포구 양화로 29,아람광고앞,N,parkingKickboard
+320.0,마포구,마포구 양화로 32,황실마사지앞,N,parkingKickboard
+321.0,마포구,마포구 양화로 44,모델하우스(견본주택)앞,N,parkingKickboard
+322.0,마포구,마포구 백범로 192,에스오일본사 앞,N,parkingKickboard
+323.0,마포구,마포구 월드컵로 196,올리브영 앞 ,N,parkingKickboard
+324.0,노원구,노원구 하계동 256-9,대진고교교차로,N,parkingKickboard
+325.0,노원구,노원구 상계동 694-1,임광아파트종합상가 옆,N,parkingKickboard
+326.0,강서구,마곡서1로 100,신방화역 5번 출구,N,parkingKickboard
+327.0,강서구,강서로 40,까치산역 2번 출구,N,parkingKickboard
+328.0,노원구,중계동 434-1,상계동 뚜레주르 앞,N,parkingKickboard
+329.0,노원구,한글비석로 389-2,상계중앙시장 앞 따릉이 옆,N,parkingKickboard

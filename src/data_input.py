@@ -3,9 +3,12 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import time
 import xml.etree.ElementTree as ET
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote
 
 import pandas as pd
 import yaml
@@ -26,6 +29,7 @@ from common import (
 
 
 SEOUL_BIKE_URL_TEMPLATE = "http://openapi.seoul.go.kr:8088/{key}/json/bikeList/{start}/{end}/"
+SEOUL_OPENAPI_URL_TEMPLATE = "http://openapi.seoul.go.kr:8088/{key}/json/{service}/{start}/{end}/{suffix}"
 PRIVATE_PM_SUMMARY_FILE = "서울시 민간대여 공유 전동킥보드 기기 현황_25.12월기준.csv"
 
 
@@ -63,14 +67,139 @@ def normalize_bike_rows(rows: list[dict[str, Any]]) -> pd.DataFrame:
     return df.dropna(subset=["station_id", "latitude", "longitude"]).drop_duplicates("station_id")
 
 
+def seoul_api_key() -> str:
+    key = env_first(["SEOUL_API_KEY", "SEOUL_OPEN_API_KEY"])
+    if not key:
+        raise RuntimeError("SEOUL_API_KEY or SEOUL_OPEN_API_KEY is required.")
+    return key
+
+
+def extract_seoul_rows(payload: dict[str, Any], service: str) -> tuple[list[dict[str, Any]], int | None, str | None]:
+    body = payload.get(service)
+    if not isinstance(body, dict):
+        body = next((value for value in payload.values() if isinstance(value, dict) and "row" in value), {})
+    rows = body.get("row", []) if isinstance(body, dict) else []
+    total = body.get("list_total_count") if isinstance(body, dict) else None
+    result = body.get("RESULT", {}) if isinstance(body, dict) else {}
+    code = result.get("CODE") if isinstance(result, dict) else None
+    try:
+        total_count = int(total) if total is not None else None
+    except ValueError:
+        total_count = None
+    return rows if isinstance(rows, list) else [], total_count, code
+
+
+def seoul_openapi_url(key: str, service: str, start: int, end: int, suffix_parts: list[str] | None = None) -> str:
+    suffix = "/".join(str(part).strip("/") for part in (suffix_parts or []) if str(part) != "")
+    if suffix:
+        suffix += "/"
+    return SEOUL_OPENAPI_URL_TEMPLATE.format(
+        key=quote(key, safe=""),
+        service=service,
+        start=start,
+        end=end,
+        suffix=suffix,
+    )
+
+
+def fetch_seoul_openapi_rows(
+    config: dict[str, Any],
+    service: str,
+    raw_subdir: str,
+    snapshot_label: str,
+    suffix_parts: list[str] | None = None,
+    max_pages: int | None = None,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    key = seoul_api_key()
+    api_cfg = config["data_input"]["apis"].get("seoul_openapi", {})
+    rows_per_page = int(api_cfg.get("rows_per_page", 1000))
+    retry_attempts = int(api_cfg.get("retry_attempts", 3))
+    retry_sleep_seconds = float(api_cfg.get("retry_sleep_seconds", 1.0))
+    raw_dir = ensure_dir(Path(config["data_input"]["paths"]["raw_api_dir"]) / raw_subdir)
+    page_limit = max_pages or 10_000
+    rows_all: list[dict[str, Any]] = []
+    events: list[dict[str, Any]] = []
+    known_total_count: int | None = None
+
+    for page in range(page_limit):
+        start = page * rows_per_page + 1
+        end = (page + 1) * rows_per_page
+        rows: list[dict[str, Any]] = []
+        total_count: int | None = None
+        code: str | None = None
+
+        for attempt in range(1, max(retry_attempts, 1) + 1):
+            url = seoul_openapi_url(key, service, start, end, suffix_parts)
+            result = http_get(url, secrets=[key])
+            response_format = detect_response_format(result.text)
+            suffix_label = "_".join(str(part) for part in (suffix_parts or [])) or "all"
+            attempt_label = f"_attempt{attempt}" if attempt > 1 else ""
+            raw_path = raw_dir / (
+                f"{service}_{snapshot_label}_{suffix_label}_{start}_{end}{attempt_label}.{response_format}"
+            )
+            raw_path.write_text(result.text, encoding="utf-8")
+            event = {
+                "service": service,
+                "attempt": attempt,
+                "redacted_url": result.redacted_url,
+                "raw_path": str(raw_path),
+                "response_format": response_format,
+                "notes": result.notes,
+            }
+
+            if response_format != "json":
+                event["ok"] = False
+                event["error"] = f"Expected JSON, got {response_format}."
+                events.append(event)
+                if attempt < retry_attempts:
+                    time.sleep(retry_sleep_seconds)
+                    continue
+                break
+
+            try:
+                payload = json.loads(result.text)
+            except json.JSONDecodeError as exc:
+                event["ok"] = False
+                event["error"] = f"JSON decode failed: {exc}"
+                events.append(event)
+                if attempt < retry_attempts:
+                    time.sleep(retry_sleep_seconds)
+                    continue
+                break
+
+            rows, total_count, code = extract_seoul_rows(payload, service)
+            if total_count is not None:
+                known_total_count = total_count
+            event.update({"ok": code == "INFO-000", "rows": len(rows), "total_count": total_count, "code": code})
+            events.append(event)
+
+            retry_empty_page = code == "INFO-000" and not rows and (
+                known_total_count is None or len(rows_all) < known_total_count
+            )
+            retry_bad_code = code != "INFO-000"
+            if (retry_empty_page or retry_bad_code) and attempt < retry_attempts:
+                time.sleep(retry_sleep_seconds)
+                continue
+            break
+
+        rows_all.extend(rows)
+
+        if code != "INFO-000" or not rows:
+            break
+        if len(rows) < rows_per_page:
+            break
+        if known_total_count is not None and len(rows_all) >= known_total_count:
+            break
+
+    return rows_all, events
+
+
 def fetch_seoul_bike_stations(
     config: dict[str, Any],
     snapshot_label: str,
     max_pages: int | None = None,
 ) -> pd.DataFrame:
-    key = env_first(["SEOUL_API_KEY", "SEOUL_OPEN_API_KEY"])
-    if not key:
-        raise RuntimeError("SEOUL_API_KEY or SEOUL_OPEN_API_KEY is required.")
+    key = seoul_api_key()
 
     api_cfg = config["data_input"]["apis"]["seoul_bike"]
     rows_per_page = int(api_cfg.get("rows_per_page", 1000))
@@ -128,6 +257,199 @@ def fetch_seoul_bike_stations(
         },
     )
     return stations
+
+
+def normalize_kickboard_tow_rows(rows: list[dict[str, Any]]) -> pd.DataFrame:
+    records = []
+    for row in rows:
+        records.append(
+            {
+                "event_date": row.get("DCLR_DT"),
+                "gu_name": row.get("GU_NM"),
+                "address": row.get("ADDR"),
+                "tow_type": row.get("TYPE"),
+                "action_date": row.get("ACTN_DAY"),
+                "source_service": "tbAutoKickboard",
+            }
+        )
+    return pd.DataFrame.from_records(records)
+
+
+def fetch_seoul_kickboard_tow(
+    config: dict[str, Any],
+    snapshot_label: str,
+    max_pages: int | None = None,
+) -> pd.DataFrame:
+    service = config["data_input"]["apis"]["seoul_openapi"]["kickboard_tow_service"]
+    rows, events = fetch_seoul_openapi_rows(
+        config,
+        service,
+        "seoul_kickboard_tow",
+        snapshot_label,
+        max_pages=max_pages,
+    )
+    normalized = normalize_kickboard_tow_rows(rows)
+    out_path = Path(config["data_input"]["paths"]["seoul_pm_tow_events_csv"])
+    ensure_dir(out_path.parent)
+    normalized.to_csv(out_path, index=False)
+    record_manifest(
+        config,
+        {
+            "source": "seoul_kickboard_tow",
+            "ok": not normalized.empty,
+            "rows": len(normalized),
+            "normalized_path": str(out_path),
+            "snapshot_label": snapshot_label,
+            "page_event_count": len(events),
+            "page_events_sample": events[:20],
+            "notes": [
+                "Actual Seoul Open Data tbAutoKickboard rows. "
+                "Use as PM activity/friction proxy, not as live device inventory."
+            ],
+        },
+    )
+    return normalized
+
+
+def normalize_kickboard_parking_rows(rows: list[dict[str, Any]]) -> pd.DataFrame:
+    records = []
+    for row in rows:
+        records.append(
+            {
+                "parking_id": row.get("SN"),
+                "gu_name": row.get("SGG_NM"),
+                "address": row.get("PSTN"),
+                "detail_location": row.get("DTL_PSTN"),
+                "has_stand": row.get("STAND_YN"),
+                "source_service": "parkingKickboard",
+            }
+        )
+    return pd.DataFrame.from_records(records)
+
+
+def fetch_seoul_kickboard_parking(
+    config: dict[str, Any],
+    snapshot_label: str,
+    max_pages: int | None = None,
+) -> pd.DataFrame:
+    service = config["data_input"]["apis"]["seoul_openapi"]["kickboard_parking_service"]
+    rows, events = fetch_seoul_openapi_rows(
+        config,
+        service,
+        "seoul_kickboard_parking",
+        snapshot_label,
+        max_pages=max_pages,
+    )
+    normalized = normalize_kickboard_parking_rows(rows)
+    out_path = Path(config["data_input"]["paths"]["seoul_kickboard_parking_zones_csv"])
+    ensure_dir(out_path.parent)
+    normalized.to_csv(out_path, index=False)
+    record_manifest(
+        config,
+        {
+            "source": "seoul_kickboard_parking",
+            "ok": not normalized.empty,
+            "rows": len(normalized),
+            "normalized_path": str(out_path),
+            "snapshot_label": snapshot_label,
+            "page_event_count": len(events),
+            "page_events_sample": events[:20],
+            "notes": ["Actual Seoul Open Data parkingKickboard rows. Use as placement constraint/prior."],
+        },
+    )
+    return normalized
+
+
+def operating_day_hours(operating_day: str, configured_hours: list[int] | None = None) -> list[tuple[str, int]]:
+    if configured_hours:
+        return [(operating_day, int(hour)) for hour in configured_hours]
+    day = datetime.strptime(operating_day, "%Y-%m-%d").date()
+    next_day = day + timedelta(days=1)
+    return [(day.isoformat(), hour) for hour in range(4, 24)] + [
+        (next_day.isoformat(), hour) for hour in range(0, 4)
+    ]
+
+
+def normalize_bike_trip_history_rows(rows: list[dict[str, Any]]) -> pd.DataFrame:
+    records = []
+    for row in rows:
+        records.append(
+            {
+                "rental_datetime": row.get("RENT_DT"),
+                "return_datetime": row.get("RTN_DT"),
+                "rental_station_id": row.get("RENT_STATION_ID") or row.get("RENT_ID"),
+                "return_station_id": row.get("RETURN_STATION_ID") or row.get("RTN_ID"),
+                "distance_m": pd.to_numeric(row.get("USE_DST"), errors="coerce"),
+                "duration_min": pd.to_numeric(row.get("USE_MIN"), errors="coerce"),
+                "bike_type": row.get("BIKE_SE_CD"),
+                "source_service": "tbCycleRentData",
+            }
+        )
+    df = pd.DataFrame.from_records(records)
+    if df.empty:
+        return df
+    return df.dropna(
+        subset=[
+            "rental_datetime",
+            "return_datetime",
+            "rental_station_id",
+            "return_station_id",
+            "distance_m",
+            "duration_min",
+        ]
+    )
+
+
+def fetch_seoul_bike_trip_history(
+    config: dict[str, Any],
+    snapshot_label: str,
+    operating_day: str | None = None,
+    max_pages_per_hour: int | None = None,
+) -> pd.DataFrame:
+    api_cfg = config["data_input"]["apis"]["seoul_openapi"]
+    service = api_cfg["bike_trip_history_service"]
+    target_day = operating_day or api_cfg["bike_trip_history_default_operating_day"]
+    configured_hours = api_cfg.get("bike_trip_history_hours")
+    pages_per_hour = max_pages_per_hour or int(api_cfg.get("max_trip_pages_per_hour", 3))
+
+    rows_all: list[dict[str, Any]] = []
+    events: list[dict[str, Any]] = []
+    for date_text, hour in operating_day_hours(target_day, configured_hours):
+        rows, hour_events = fetch_seoul_openapi_rows(
+            config,
+            service,
+            "seoul_bike_trip_history",
+            snapshot_label,
+            suffix_parts=[date_text, str(hour)],
+            max_pages=pages_per_hour,
+        )
+        rows_all.extend(rows)
+        events.extend(hour_events)
+
+    normalized = normalize_bike_trip_history_rows(rows_all)
+    out_path = Path(config["data_input"]["paths"]["seoul_bike_trips_pattern"].format(operating_day=target_day))
+    ensure_dir(out_path.parent)
+    normalized.to_csv(out_path, index=False)
+    record_manifest(
+        config,
+        {
+            "source": "seoul_bike_trip_history",
+            "ok": not normalized.empty,
+            "rows": len(normalized),
+            "normalized_path": str(out_path),
+            "snapshot_label": snapshot_label,
+            "operating_day": target_day,
+            "hours": operating_day_hours(target_day, configured_hours),
+            "max_pages_per_hour": pages_per_hour,
+            "page_event_count": len(events),
+            "page_events_sample": events[:20],
+            "notes": [
+                "Actual Seoul Bike tbCycleRentData rows. "
+                "Configured hours may be a sample; raise max_trip_pages_per_hour or clear bike_trip_history_hours for full-day collection."
+            ],
+        },
+    )
+    return normalized
 
 
 def first_value(row: dict[str, Any], names: list[str]) -> Any:
@@ -561,6 +883,23 @@ def run_data_input(args: argparse.Namespace) -> None:
         summary = normalize_private_pm_operator_summary(config)
         print(f"private-pm-summary rows={len(summary)}")
 
+    if args.source in {"all", "seoul-kickboard-tow", "pm-surrogates"}:
+        tow = fetch_seoul_kickboard_tow(config, snapshot_label, args.max_pages)
+        print(f"seoul-kickboard-tow rows={len(tow)}")
+
+    if args.source in {"all", "seoul-kickboard-parking", "pm-surrogates"}:
+        parking = fetch_seoul_kickboard_parking(config, snapshot_label, args.max_pages)
+        print(f"seoul-kickboard-parking rows={len(parking)}")
+
+    if args.source in {"all", "seoul-bike-trips", "pm-surrogates"}:
+        trips = fetch_seoul_bike_trip_history(
+            config,
+            snapshot_label,
+            args.operating_day,
+            args.max_pages_per_hour,
+        )
+        print(f"seoul-bike-trips rows={len(trips)}")
+
     print(f"manifest={manifest_path(config)}")
 
 
@@ -571,10 +910,21 @@ def main() -> None:
     parser.add_argument("--snapshot-label")
     parser.add_argument(
         "--source",
-        choices=["all", "seoul-bike", "tago-pm", "private-pm-summary"],
+        choices=[
+            "all",
+            "seoul-bike",
+            "tago-pm",
+            "private-pm-summary",
+            "seoul-kickboard-tow",
+            "seoul-kickboard-parking",
+            "seoul-bike-trips",
+            "pm-surrogates",
+        ],
         default="all",
     )
     parser.add_argument("--max-pages", type=int)
+    parser.add_argument("--operating-day", help="YYYY-MM-DD operating day for Seoul Bike trip history.")
+    parser.add_argument("--max-pages-per-hour", type=int)
     args = parser.parse_args()
     run_data_input(args)
 

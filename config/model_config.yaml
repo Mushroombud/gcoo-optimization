@@ -45,12 +45,25 @@ data_input:
     raw_api_dir: data/raw/api
     manifest_jsonl: data/raw/snapshot_manifest.jsonl
     seoul_bike_stations_csv: data/raw/seoul_bike_stations.csv
+    seoul_bike_trips_pattern: data/raw/seoul_bike_trips_{operating_day}.csv
     tago_pm_snapshot_pattern: data/raw/tago_pm_snapshots_{label}.csv
     private_pm_operator_summary_csv: data/raw/seoul_private_pm_operator_summary.csv
+    seoul_pm_tow_events_csv: data/raw/seoul_pm_tow_events.csv
+    seoul_kickboard_parking_zones_csv: data/raw/seoul_kickboard_parking_zones.csv
   apis:
     seoul_bike:
       rows_per_page: 1000
       max_pages: 10
+    seoul_openapi:
+      rows_per_page: 1000
+      retry_attempts: 3
+      retry_sleep_seconds: 1.0
+      kickboard_tow_service: tbAutoKickboard
+      kickboard_parking_service: parkingKickboard
+      bike_trip_history_service: tbCycleRentData
+      bike_trip_history_default_operating_day: "2025-10-01"
+      bike_trip_history_hours: [8, 9, 18, 19]
+      max_trip_pages_per_hour: 3
     tago_pm:
       base_url: https://apis.data.go.kr/1613000/PersonalMobilityInfo
       provider_operation: GetPMProvider
@@ -65,6 +78,17 @@ data_input:
 
 model:
   inputs:
+    seoul_admin_dong_geojson: data/raw/seoul_admin_dong.geojson
     seoul_bike_stations_csv: data/raw/seoul_bike_stations.csv
+    seoul_bike_trips_glob: data/raw/seoul_bike_trips_*.csv
     tago_pm_snapshots_glob: data/raw/tago_pm_snapshots_*.csv
     private_pm_operator_summary_csv: data/raw/seoul_private_pm_operator_summary.csv
+    seoul_pm_tow_events_csv: data/raw/seoul_pm_tow_events.csv
+    seoul_kickboard_parking_zones_csv: data/raw/seoul_kickboard_parking_zones.csv
+  surrogate_pm:
+    enabled_when_tago_missing: true
+    fallback_gcoo_total_supply: 500
+    fallback_competitor_total_supply: 5000
+    demand_weight: 1.0
+    tow_weight: 2.0
+    parking_weight: 0.5
