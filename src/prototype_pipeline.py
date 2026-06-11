@@ -656,6 +656,7 @@ def optimize_allocation(
 
     fallback_distance_km = float(cost_cfg.get("rebalancing_fallback_distance_km", 2.0))
     rebalancing_cost_per_km = float(cost_cfg.get("rebalancing_cost_per_scooter_km", 0.0))
+    rebalancing_candidate_pool_size = int(cost_cfg.get("rebalancing_candidate_pool_size", 80))
     transitions, distance_lookup = build_od_rebalancing_tables(
         od_trips if od_trips is not None else pd.DataFrame(), fallback_distance_km
     )
@@ -667,19 +668,19 @@ def optimize_allocation(
     rebalancing_cost = 0.0
 
     if rebalancing_cost_per_km > 0 and transitions:
+        ranked_marginal_items = [item for item in marginal_items if item["delta_profit"] > 0]
+        ranked_marginal_items.sort(key=lambda item: item["delta_profit"], reverse=True)
         while selected < total_supply:
             best_item: dict[str, Any] | None = None
-            for dong_id, row in input_lookup.items():
-                current_k = allocation[dong_id]
-                next_k = current_k + 1
-                if next_k > int(row["K_i"]):
+            evaluated_candidates = 0
+            for item in ranked_marginal_items:
+                if evaluated_candidates >= rebalancing_candidate_pool_size:
+                    break
+                dong_id = item["dong_id"]
+                next_k = allocation[dong_id] + 1
+                if item["k"] != next_k:
                     continue
-                operating_delta = (
-                    operating_profit_by_k[dong_id][next_k]
-                    - operating_profit_by_k[dong_id][current_k]
-                )
-                if operating_delta <= 0:
-                    continue
+                operating_delta = float(item["delta_profit"])
                 candidate_allocation = dict(allocation)
                 candidate_allocation[dong_id] = next_k
                 candidate_utilization = {
@@ -694,6 +695,7 @@ def optimize_allocation(
                     fallback_distance_km,
                     rebalancing_cost_per_km,
                 )
+                evaluated_candidates += 1
                 adjusted_delta = operating_delta - (candidate_cost - rebalancing_cost)
                 if adjusted_delta <= 0:
                     continue

@@ -23,6 +23,7 @@ cost:
   mu_imbalance_cost: 0.5
   rebalancing_cost_per_scooter_km: 900
   rebalancing_fallback_distance_km: 2.0
+  rebalancing_candidate_pool_size: 80
 
 nonlinear_model:
   lambda_market_validation: 0.3
