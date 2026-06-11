@@ -3,26 +3,107 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Sejong TAGO PM Visualization</title>
+  <title>GCOO Mobility Visualizations</title>
   <style>
-    body { margin: 0; font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #f6f7f9; color: #1b1f24; }
-    main { max-width: 840px; margin: 0 auto; padding: 48px 20px; }
-    h1 { margin: 0 0 12px; font-size: 28px; }
-    p { margin: 0 0 24px; color: #4b5563; line-height: 1.6; }
-    nav { display: grid; gap: 12px; }
-    a { display: block; padding: 16px 18px; border: 1px solid #d8dee8; border-radius: 8px; background: #fff; color: #0f4c81; text-decoration: none; font-weight: 650; }
-    a span { display: block; margin-top: 4px; color: #6b7280; font-size: 14px; font-weight: 400; }
+    :root {
+      color-scheme: light;
+      --ink: #172033;
+      --muted: #5d687a;
+      --line: #d9e0ea;
+      --panel: #ffffff;
+      --seoul: #176b87;
+      --sejong: #6d5f15;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: #f4f6f8;
+      color: var(--ink);
+    }
+    main {
+      max-width: 980px;
+      margin: 0 auto;
+      padding: 48px 20px;
+    }
+    h1 {
+      margin: 0 0 10px;
+      font-size: 30px;
+      line-height: 1.2;
+    }
+    .lead {
+      max-width: 720px;
+      margin: 0 0 30px;
+      color: var(--muted);
+      line-height: 1.65;
+    }
+    section {
+      margin-top: 26px;
+    }
+    h2 {
+      margin: 0 0 12px;
+      font-size: 18px;
+      line-height: 1.35;
+    }
+    nav {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 12px;
+    }
+    a {
+      display: block;
+      min-height: 104px;
+      padding: 16px 18px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--panel);
+      color: var(--seoul);
+      text-decoration: none;
+      font-weight: 700;
+      box-shadow: 0 8px 22px rgba(23, 32, 51, 0.05);
+    }
+    a:hover {
+      border-color: #9fb3c8;
+      transform: translateY(-1px);
+    }
+    a span {
+      display: block;
+      margin-top: 6px;
+      color: var(--muted);
+      font-size: 14px;
+      line-height: 1.5;
+      font-weight: 400;
+    }
+    .sejong a { color: var(--sejong); }
+    @media (max-width: 680px) {
+      main { padding: 34px 16px; }
+      nav { grid-template-columns: 1fr; }
+      a { min-height: auto; }
+    }
   </style>
 </head>
 <body>
   <main>
-    <h1>Sejong TAGO PM Visualization</h1>
-    <p>수집 cron이 갱신하는 최신 세종 PM 스냅샷 기반 정적 리포트입니다.</p>
-    <nav>
-      <a href="./sejong_map.html">지도 보기<span>최신 PM 위치, 열지도, 500m 격자 집계</span></a>
-      <a href="./sejong_charts_dashboard.html">차트 대시보드 보기<span>공급자별 공급량, 시간 추세, 배터리 분포</span></a>
-      <a href="./sejong_visualization_manifest.json">Manifest JSON<span>생성 시각과 입력 데이터 행 수</span></a>
-    </nav>
+    <h1>GCOO Mobility Visualizations</h1>
+    <p class="lead">수집된 서울 따릉이 데이터와 세종 TAGO PM 데이터를 함께 볼 수 있는 시각화 허브입니다.</p>
+
+    <section class="seoul">
+      <h2>서울시 따릉이 기반 시각화</h2>
+      <nav>
+        <a href="./seoul_map.html">서울 지도 보기<span>따릉이 대여소 위치, 거치 현황 히트맵, 행정동별 수요 지표</span></a>
+        <a href="./charts_dashboard.html">서울 차트 대시보드 보기<span>수집된 따릉이 기반 모델 입력, 수요, 배치 결과 차트</span></a>
+        <a href="./seoul_visualization_manifest.json">서울 Manifest JSON<span>입력 경로, 지도 지표, 따릉이 데이터 행 수 등</span></a>
+      </nav>
+    </section>
+
+    <section class="sejong">
+      <h2>세종시 TAGO PM 시각화</h2>
+      <nav>
+        <a href="./sejong_map.html">세종 지도 보기<span>최신 PM 위치, 공급사별 기기, 지도 기반 히트맵</span></a>
+        <a href="./sejong_charts_dashboard.html">세종 차트 대시보드 보기<span>공급사별 기기 수, 배터리, 시간대별 스냅샷</span></a>
+        <a href="./sejong_visualization_manifest.json">세종 Manifest JSON<span>생성 산출물과 TAGO 수집 행 수 등</span></a>
+      </nav>
+    </section>
   </main>
 </body>
 </html>

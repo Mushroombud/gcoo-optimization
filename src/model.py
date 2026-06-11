@@ -392,9 +392,8 @@ def run_model(args: argparse.Namespace) -> int:
         ),
         "allocated_scooters": int(allocation["x_star_i"].sum()),
         "active_dongs": int((allocation["x_star_i"] > 0).sum()),
-        "expected_rebalancing_km": float(allocation["expected_rebalancing_km"].max()),
-        "expected_rebalancing_cost": float(allocation["expected_rebalancing_cost"].max()),
-        "expected_profit_after_rebalancing": float(allocation["expected_profit_after_rebalancing"].max()),
+        "expected_rebalancing_cost_krw": float(allocation["expected_rebalancing_cost_krw"].max()),
+        "expected_profit_after_rebalancing_krw": float(allocation["expected_profit_after_rebalancing_krw"].max()),
     }
     write_json(out_dir / "model_readiness.json", readiness)
     lines = [
@@ -407,9 +406,8 @@ def run_model(args: argparse.Namespace) -> int:
         f"- PM scenario rows: {len(tago_scenario)}",
         f"- Allocated scooters: {readiness['allocated_scooters']}",
         f"- Active dongs: {readiness['active_dongs']}",
-        f"- Expected rebalancing km: {readiness['expected_rebalancing_km']:.2f}",
-        f"- Expected rebalancing cost: {readiness['expected_rebalancing_cost']:.0f}",
-        f"- Expected profit after rebalancing: {readiness['expected_profit_after_rebalancing']:.0f}",
+        f"- Expected rebalancing cost KRW: {readiness['expected_rebalancing_cost_krw']:.0f}",
+        f"- Expected profit after rebalancing KRW: {readiness['expected_profit_after_rebalancing_krw']:.0f}",
         "",
         "Notes:",
         *[f"- {note}" for note in notes],

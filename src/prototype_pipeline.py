@@ -444,15 +444,25 @@ def build_model_inputs(
     trip_minutes = (
         model["avg_distance_km_i"] / revenue_cfg["avg_scooter_speed_kmph"] * 60.0
     )
-    model["p_i"] = revenue_cfg["unlock_fee"] + revenue_cfg["per_minute_fee"] * trip_minutes
+    unlock_fee_krw = revenue_cfg["unlock_fee_krw"]
+    per_minute_fee_krw = revenue_cfg["per_minute_fee_krw"]
+    model["expected_revenue_per_ride_krw"] = unlock_fee_krw + per_minute_fee_krw * trip_minutes
     model["B_i"] = (
         (model["mean_arrivals"] - model["mean_departures"]).abs()
         / (model["mean_arrivals"] + model["mean_departures"] + 1)
     )
-    model["c_i"] = cost_cfg["base_fixed_cost_per_scooter_day"] * (
+    base_fixed_cost_krw = cost_cfg["base_fixed_cost_per_scooter_day_krw"]
+    model["fixed_cost_per_scooter_day_krw"] = base_fixed_cost_krw * (
         1 + cost_cfg["mu_imbalance_cost"] * model["B_i"]
     )
-    return model[["dong_id", "p_i", "c_i", "K_i", "x_obs_i", "B_i"]]
+    return model[[
+        "dong_id",
+        "expected_revenue_per_ride_krw",
+        "fixed_cost_per_scooter_day_krw",
+        "K_i",
+        "x_obs_i",
+        "B_i",
+    ]]
 
 
 def compute_q(a_is: float, x_i: int, c_is: float, config: dict[str, Any]) -> float:
@@ -502,28 +512,6 @@ def build_od_rebalancing_tables(
     return transitions, distance_lookup
 
 
-def estimate_end_distribution(
-    allocation: dict[str, int],
-    transitions: dict[str, list[tuple[str, float]]],
-    utilization: dict[str, float],
-) -> dict[str, float]:
-    end_counts = {dong_id: float(count) for dong_id, count in allocation.items()}
-    for origin, count in allocation.items():
-        if count <= 0:
-            continue
-        moved = min(float(count), max(0.0, utilization.get(origin, 0.0)))
-        if moved <= 0:
-            continue
-        end_counts[origin] = end_counts.get(origin, 0.0) - moved
-        destination_mix = transitions.get(origin)
-        if not destination_mix:
-            end_counts[origin] = end_counts.get(origin, 0.0) + moved
-            continue
-        for destination, probability in destination_mix:
-            end_counts[destination] = end_counts.get(destination, 0.0) + moved * probability
-    return end_counts
-
-
 def distance_between_dongs(
     origin: str,
     destination: str,
@@ -534,54 +522,6 @@ def distance_between_dongs(
         return 0.0
     return float(distance_lookup.get((origin, destination), fallback_distance_km))
 
-
-def greedy_rebalancing_km(
-    target: dict[str, int],
-    end_counts: dict[str, float],
-    distance_lookup: dict[tuple[str, str], float],
-    fallback_distance_km: float,
-) -> float:
-    zones = sorted(set(target).union(end_counts))
-    surplus = {zone: end_counts.get(zone, 0.0) - float(target.get(zone, 0)) for zone in zones}
-    deficits = {zone: -value for zone, value in surplus.items() if value < -1e-9}
-    supplies = {zone: value for zone, value in surplus.items() if value > 1e-9}
-    total_km = 0.0
-
-    for deficit_zone, deficit_amount in sorted(deficits.items()):
-        remaining = deficit_amount
-        while remaining > 1e-9 and supplies:
-            supply_zone = min(
-                supplies,
-                key=lambda zone: distance_between_dongs(
-                    zone, deficit_zone, distance_lookup, fallback_distance_km
-                ),
-            )
-            moved = min(remaining, supplies[supply_zone])
-            total_km += moved * distance_between_dongs(
-                supply_zone, deficit_zone, distance_lookup, fallback_distance_km
-            )
-            remaining -= moved
-            supplies[supply_zone] -= moved
-            if supplies[supply_zone] <= 1e-9:
-                del supplies[supply_zone]
-    return total_km
-
-
-def estimate_rebalancing(
-    allocation: dict[str, int],
-    utilization: dict[str, float],
-    transitions: dict[str, list[tuple[str, float]]],
-    distance_lookup: dict[tuple[str, str], float],
-    fallback_distance_km: float,
-    cost_per_scooter_km: float,
-) -> tuple[float, float]:
-    if cost_per_scooter_km <= 0 or not allocation:
-        return 0.0, 0.0
-    end_counts = estimate_end_distribution(allocation, transitions, utilization)
-    relocation_km = greedy_rebalancing_km(
-        allocation, end_counts, distance_lookup, fallback_distance_km
-    )
-    return relocation_km, relocation_km * cost_per_scooter_km
 
 
 def optimize_allocation(
@@ -621,16 +561,16 @@ def optimize_allocation(
         tago.set_index(["scenario_day", "dong_id"])["competitor_count_is"].to_dict()
     )
     input_lookup = model_inputs.set_index("dong_id").to_dict("index")
-    operating_profit_by_k: dict[str, dict[int, float]] = {}
+    operating_profit_krw_by_k: dict[str, dict[int, float]] = {}
     used_scooters_by_k: dict[str, dict[int, float]] = {}
     marginal_items = []
 
     for dong_id, row in input_lookup.items():
-        operating_profit_by_k[dong_id] = {0: 0.0}
+        operating_profit_krw_by_k[dong_id] = {0: 0.0}
         used_scooters_by_k[dong_id] = {0: 0.0}
-        prev_profit = 0.0
+        prev_profit_krw = 0.0
         for k in range(1, int(row["K_i"]) + 1):
-            profit_sum = 0.0
+            profit_sum_krw = 0.0
             used_sum = 0.0
             for scenario_day in scenarios:
                 h_is = float(demand_lookup.get((scenario_day, dong_id), 0.0))
@@ -639,122 +579,97 @@ def optimize_allocation(
                 c_tilde = math.log1p(c_is) / comp_denominator if comp_max > 0 else 0.0
                 a_is = d_is * (1 + model_cfg["lambda_market_validation"] * c_tilde)
                 q_is = compute_q(a_is, k, c_is, config)
-                profit_sum += (row["p_i"] - cost_cfg["variable_cost_per_ride"]) * q_is
-                profit_sum -= row["c_i"] * k
+                variable_cost_per_ride_krw = cost_cfg["variable_cost_per_ride_krw"]
+                profit_sum_krw += (
+                    row["expected_revenue_per_ride_krw"] - variable_cost_per_ride_krw
+                ) * q_is
+                profit_sum_krw -= row["fixed_cost_per_scooter_day_krw"] * k
                 used_sum += min(float(k), q_is)
-            current_profit = profit_sum / max(len(scenarios), 1)
-            operating_profit_by_k[dong_id][k] = current_profit
+            current_profit_krw = profit_sum_krw / max(len(scenarios), 1)
+            operating_profit_krw_by_k[dong_id][k] = current_profit_krw
             used_scooters_by_k[dong_id][k] = used_sum / max(len(scenarios), 1)
             marginal_items.append(
                 {
                     "dong_id": dong_id,
                     "k": k,
-                    "delta_profit": current_profit - prev_profit,
+                    "delta_profit_krw": current_profit_krw - prev_profit_krw,
                 }
             )
-            prev_profit = current_profit
+            prev_profit_krw = current_profit_krw
 
     fallback_distance_km = float(cost_cfg.get("rebalancing_fallback_distance_km", 2.0))
-    rebalancing_cost_per_km = float(cost_cfg.get("rebalancing_cost_per_scooter_km", 0.0))
-    rebalancing_candidate_pool_size = int(cost_cfg.get("rebalancing_candidate_pool_size", 80))
+    rebalancing_krw_per_scooter_km = float(cost_cfg["rebalancing_krw_per_scooter_km"])
     transitions, distance_lookup = build_od_rebalancing_tables(
         od_trips if od_trips is not None else pd.DataFrame(), fallback_distance_km
     )
 
+    return_distance_by_origin: dict[str, float] = {}
+    for origin, destination_mix in transitions.items():
+        return_distance_by_origin[origin] = sum(
+            probability
+            * distance_between_dongs(
+                destination, origin, distance_lookup, fallback_distance_km
+            )
+            for destination, probability in destination_mix
+        )
+
     allocation = {dong_id: 0 for dong_id in model_inputs["dong_id"]}
     selected = 0
-    operating_profit = 0.0
-    rebalancing_km = 0.0
-    rebalancing_cost = 0.0
 
-    if rebalancing_cost_per_km > 0 and transitions:
-        ranked_marginal_items = [item for item in marginal_items if item["delta_profit"] > 0]
-        ranked_marginal_items.sort(key=lambda item: item["delta_profit"], reverse=True)
-        while selected < total_supply:
-            best_item: dict[str, Any] | None = None
-            evaluated_candidates = 0
-            for item in ranked_marginal_items:
-                if evaluated_candidates >= rebalancing_candidate_pool_size:
-                    break
-                dong_id = item["dong_id"]
-                next_k = allocation[dong_id] + 1
-                if item["k"] != next_k:
-                    continue
-                operating_delta = float(item["delta_profit"])
-                candidate_allocation = dict(allocation)
-                candidate_allocation[dong_id] = next_k
-                candidate_utilization = {
-                    zone: used_scooters_by_k[zone].get(count, 0.0)
-                    for zone, count in candidate_allocation.items()
-                }
-                candidate_km, candidate_cost = estimate_rebalancing(
-                    candidate_allocation,
-                    candidate_utilization,
-                    transitions,
-                    distance_lookup,
-                    fallback_distance_km,
-                    rebalancing_cost_per_km,
-                )
-                evaluated_candidates += 1
-                adjusted_delta = operating_delta - (candidate_cost - rebalancing_cost)
-                if adjusted_delta <= 0:
-                    continue
-                if best_item is None or adjusted_delta > best_item["adjusted_delta"]:
-                    best_item = {
-                        "dong_id": dong_id,
-                        "adjusted_delta": adjusted_delta,
-                        "operating_delta": operating_delta,
-                        "rebalancing_km": candidate_km,
-                        "rebalancing_cost": candidate_cost,
-                    }
-            if best_item is None:
-                break
-            best_dong = best_item["dong_id"]
-            allocation[best_dong] += 1
-            selected += 1
-            operating_profit += float(best_item["operating_delta"])
-            rebalancing_km = float(best_item["rebalancing_km"])
-            rebalancing_cost = float(best_item["rebalancing_cost"])
-    else:
-        marginal_items = [item for item in marginal_items if item["delta_profit"] > 0]
-        marginal_items.sort(key=lambda item: item["delta_profit"], reverse=True)
-        for item in marginal_items:
-            if selected >= total_supply:
-                break
-            dong_id = item["dong_id"]
-            if allocation[dong_id] == item["k"] - 1:
-                allocation[dong_id] += 1
-                selected += 1
-        operating_profit = sum(
-            operating_profit_by_k[dong_id].get(count, 0.0)
-            for dong_id, count in allocation.items()
+    adjusted_marginal_items = []
+    for item in marginal_items:
+        dong_id = item["dong_id"]
+        k = int(item["k"])
+        used_delta = (
+            used_scooters_by_k[dong_id].get(k, 0.0)
+            - used_scooters_by_k[dong_id].get(k - 1, 0.0)
         )
-        if transitions:
-            final_utilization = {
-                zone: used_scooters_by_k[zone].get(count, 0.0)
-                for zone, count in allocation.items()
+        relocation_delta_km = max(0.0, used_delta) * return_distance_by_origin.get(
+            dong_id, 0.0
+        )
+        relocation_delta_cost_krw = relocation_delta_km * rebalancing_krw_per_scooter_km
+        adjusted_delta_krw = float(item["delta_profit_krw"]) - relocation_delta_cost_krw
+        if adjusted_delta_krw <= 0:
+            continue
+        adjusted_marginal_items.append(
+            {
+                **item,
+                "adjusted_delta_krw": adjusted_delta_krw,
+                "relocation_delta_cost_krw": relocation_delta_cost_krw,
             }
-            rebalancing_km, rebalancing_cost = estimate_rebalancing(
-                allocation,
-                final_utilization,
-                transitions,
-                distance_lookup,
-                fallback_distance_km,
-                rebalancing_cost_per_km,
-            )
+        )
+    adjusted_marginal_items.sort(key=lambda item: item["adjusted_delta_krw"], reverse=True)
 
-    objective_profit = operating_profit - rebalancing_cost
+    for item in adjusted_marginal_items:
+        if selected >= total_supply:
+            break
+        dong_id = item["dong_id"]
+        if allocation[dong_id] == item["k"] - 1:
+            allocation[dong_id] += 1
+            selected += 1
+
+    operating_profit_krw = sum(
+        operating_profit_krw_by_k[dong_id].get(count, 0.0)
+        for dong_id, count in allocation.items()
+    )
+    rebalancing_km = sum(
+        used_scooters_by_k[dong_id].get(count, 0.0)
+        * return_distance_by_origin.get(dong_id, 0.0)
+        for dong_id, count in allocation.items()
+    )
+    rebalancing_cost_krw = rebalancing_km * rebalancing_krw_per_scooter_km
+
+    objective_profit_krw = operating_profit_krw - rebalancing_cost_krw
     return pd.DataFrame(
         [
             {
                 "dong_id": dong_id,
                 "x_star_i": count,
                 "total_supply_F": total_supply,
-                "expected_operating_profit": operating_profit,
-                "expected_rebalancing_km": rebalancing_km,
-                "expected_rebalancing_cost": rebalancing_cost,
-                "expected_profit_after_rebalancing": objective_profit,
-                "rebalancing_cost_per_scooter_km": rebalancing_cost_per_km,
+                "expected_operating_profit_krw": operating_profit_krw,
+                "expected_rebalancing_cost_krw": rebalancing_cost_krw,
+                "expected_profit_after_rebalancing_krw": objective_profit_krw,
+                "rebalancing_krw_per_scooter_km": rebalancing_krw_per_scooter_km,
             }
             for dong_id, count in allocation.items()
         ]
@@ -784,9 +699,8 @@ def write_report(
         "",
         f"- Total supply used: {int(allocation['total_supply_F'].max())}",
         f"- Active dongs: {len(active_alloc)}",
-        f"- Expected rebalancing km: {float(allocation['expected_rebalancing_km'].max()):.2f}",
-        f"- Expected rebalancing cost: {float(allocation['expected_rebalancing_cost'].max()):.0f}",
-        f"- Expected profit after rebalancing: {float(allocation['expected_profit_after_rebalancing'].max()):.0f}",
+        f"- Expected rebalancing cost KRW: {float(allocation['expected_rebalancing_cost_krw'].max()):.0f}",
+        f"- Expected profit after rebalancing KRW: {float(allocation['expected_profit_after_rebalancing_krw'].max()):.0f}",
         "",
         "Top allocated dongs:",
     ]

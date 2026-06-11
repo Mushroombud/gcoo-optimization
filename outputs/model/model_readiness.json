@@ -11,13 +11,15 @@
     "Loaded Seoul Bike station file: data/raw/seoul_bike_stations.csv",
     "Mapped 2718/2721 bike stations to real dong polygons.",
     "Loaded 1 Seoul Bike trip file(s), rows=11989.",
-    "Filtered TAGO PM rows by city_name=서울: 4165 -> 0.",
-    "Loaded 1 TAGO PM snapshot file(s).",
+    "Filtered TAGO PM rows by city_name=서울: 16660 -> 0.",
+    "Loaded 4 TAGO PM snapshot file(s).",
     "Mapped 70236/283998 tow events to dong by address text.",
     "Mapped 46/329 parking zones to dong by address text.",
     "Built surrogate PM scenario from Seoul Bike demand, tow events, parking zones, and private PM operator summary.",
     "Surrogate counts are planning priors, not live per-device TAGO observations."
   ],
-  "allocated_scooters": 5,
-  "active_dongs": 2
+  "allocated_scooters": 0,
+  "active_dongs": 0,
+  "expected_rebalancing_cost_krw": 0.0,
+  "expected_profit_after_rebalancing_krw": 0.0
 }

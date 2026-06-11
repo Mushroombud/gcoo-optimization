@@ -1,17 +1,12 @@
-# GCOO 서울 배치 프로토타입
+# Personal Mobility 배치 최적화 문제
 
-이 저장소는 `Spec.md`에서 출발해 다음을 수행하는 최소 프로토타입을 제공합니다.
-
-1. 현재 접근 가능한 공공 API 확인
-2. 최적화 계획에 필요한 데이터 중 API로 확보 가능한 항목과 불가능한 항목 문서화
-3. API 형태의 입력을 최적화 명세가 요구하는 테이블로 변환
-4. 작은 end-to-end 배치 예제 실행
+이 레포지토리는 경영과학에서의 PM 배치 최적화 프로젝트를 위한 코드베이스입니다.
 
 ## 현재 API 확인 결과
 
 ### 서울 공공자전거 / 서울 열린데이터광장
 
-서울 열린데이터광장 샘플 키로 접근 가능함을 확인했습니다.
+서울 열린데이터광장 API 키로 접근 가능합니다.
 
 ```text
 http://openapi.seoul.go.kr:8088/sample/json/bikeList/1/5/
@@ -318,13 +313,21 @@ q_is = min(
 
 ```text
 maximize over x:
-  E_s [ sum_i ((p_i - variable_cost) * q_is(x_i, c_is) - c_i * x_i) ]
-  - rebalancing_cost_per_scooter_km * estimated_rebalancing_km(x)
+  E_s [ sum_i ((revenue_per_ride_krw_i - variable_cost_per_ride_krw)
+                * q_is(x_i, c_is)
+                - fixed_cost_per_scooter_day_krw_i * x_i) ]
+  - rebalancing_cost_krw(x)
+
+where:
+  rebalancing_cost_krw(x)
+    = rebalancing_krw_per_scooter_km
+      * expected_return_distance_km_per_used_scooter_i
+      * expected_used_scooters_i(x)
 ```
 
-`estimated_rebalancing_km(x)`는 PM 유사 OD 이동이 끝난 뒤 장치가 남아 있을 것으로 추정되는 행정동 분포를 만들고, 다음날 04:00 목표 배치 `x_i`로 되돌리는 데 필요한 총 scooter-km입니다. 현재 구현은 추가 선형계획 의존성을 두지 않기 위해 관측 OD 거리 기반 nearest-surplus matching으로 근사합니다.
+거리 자체는 목적함수 value가 아닙니다. OD에서 나온 km는 원화 비용을 계산하기 위한 물리량으로만 쓰고, 모델의 수익/비용/목적함수 산출값은 모두 KRW입니다.
 
-세종 pivot에서는 `p_i`를 실제 결제 데이터 없이 직접 관측할 수 없으므로, 평균 이동 거리 또는 평균 이동 시간 proxy로 추정합니다. 초기값은 현재 설정처럼 unlock fee와 분당 요금 가정을 사용하고, 이후 실제 GCOO 요금/정산 데이터가 생기면 `p_i`를 교체합니다.
+세종 pivot에서는 `revenue_per_ride_krw_i`를 실제 결제 데이터 없이 직접 관측할 수 없으므로, 평균 이동 거리 또는 평균 이동 시간 proxy로 추정합니다. 초기값은 현재 설정처럼 `unlock_fee_krw`와 `per_minute_fee_krw` 가정을 사용하고, 이후 실제 GCOO 요금/정산 데이터가 생기면 KRW 매출값을 교체합니다.
 
 필수 제약식:
 
@@ -349,8 +352,8 @@ x_i integer
 
 1. 따릉이 PM 유사 OD에서 `origin_dong_id -> destination_dong_id` 전이확률과 평균 거리를 계산합니다.
 2. `q_is(x_i, c_is)`가 발생한 만큼 영업 종료 후 장치가 목적지 행정동에 남는다고 추정합니다.
-3. 종료 분포의 surplus를 다음날 04:00 목표 배치의 deficit으로 매칭해 `estimated_rebalancing_km`를 계산합니다.
-4. `rebalancing_cost_per_scooter_km`를 곱한 값을 기대 영업이익에서 차감합니다.
+3. 행정동별 평균 원복거리 `E[dist(destination, origin)]`를 각 추가 배치의 marginal relocation distance로 계산합니다.
+4. `rebalancing_krw_per_scooter_km`를 곱해 `rebalancing_cost_krw`로 변환한 뒤 marginal profit KRW와 최종 기대 영업이익 KRW에서 차감합니다.
 
 향후 정확한 min-cost flow를 쓰려면 `r_ij`를 명시 변수로 두고 `sum_j r_ij`, `sum_i r_ij` 보존 제약을 추가하면 됩니다.
 
@@ -392,7 +395,7 @@ origin_dong_id != destination_dong_id
 
 4. 새벽 4시 이전 이동은 전날 operating day로 묶어 야간 이동을 같은 영업일에 포함합니다.
 5. 출발 행정동 기준으로 `H_is`와 `departures_is`를 집계하고, 도착 행정동 기준으로 `arrivals_is`를 집계합니다.
-6. 평균 이동 거리 `avg_distance_km_i`는 예상 요금 `p_i` 계산에 사용합니다.
+6. 평균 이동 거리 `avg_distance_km_i`는 예상 요금 `revenue_per_ride_krw_i` 계산에만 사용합니다.
 7. 전체 수요 규모는 총 fleet `F`와 평균 회전율 `u0_avg_rides_per_scooter_day`를 이용해 scooter 이용 수요로 scaling합니다.
 
 서울 따릉이 pivot의 decision variable은 세종과 동일하게 시작할 수 있습니다.
@@ -410,14 +413,17 @@ origin_dong_id != destination_dong_id
 
 ```text
 maximize over x:
-  E_s [ sum_i ((p_i - variable_cost) * q_is(x_i, c_is) - c_i * x_i) ]
+  E_s [ sum_i ((revenue_per_ride_krw_i - variable_cost_per_ride_krw)
+                * q_is(x_i, c_is)
+                - fixed_cost_per_scooter_day_krw_i * x_i) ]
+  - rebalancing_cost_krw(x)
 ```
 
 서울 pivot에서는 각 항목을 다음처럼 정의합니다.
 
 - `H_is`: PM 유사 조건을 통과한 따릉이 출발 trip 수
-- `p_i`: `avg_distance_km_i / avg_scooter_speed_kmph * 60`으로 계산한 예상 이용 시간에 unlock fee와 분당 요금을 적용
-- `c_i`: 기본 일별 운영비에 imbalance penalty를 더한 값
+- `revenue_per_ride_krw_i`: `avg_distance_km_i / avg_scooter_speed_kmph * 60`으로 계산한 예상 이용 시간에 `unlock_fee_krw`와 `per_minute_fee_krw`를 적용한 원화 매출
+- `fixed_cost_per_scooter_day_krw_i`: 기본 일별 운영비 KRW에 imbalance penalty를 더한 원화 비용
 - `K_i`: 실제 TAGO PM이 없으면 수요, 견인 이벤트, 주차구역, 사업자 총량 prior로 만든 surrogate capacity
 - `c_is`: PM 견인/주차/사업자 요약과 수요 가중치로 만든 surrogate competitor count
 
@@ -435,8 +441,8 @@ x_i integer
 | --- | --- |
 | demand support | PM 유사 따릉이 수요가 거의 없는 행정동은 배치 후보에서 제외 |
 | capacity | 실제 PM 관측이 없으므로 `K_i`를 수요 분위수, PM 주차구역, 견인 이벤트, 도로/상권 proxy로 보수적으로 제한 |
-| imbalance penalty | 유출입 차이가 큰 곳은 기본 운영비 `c_i` 증가 |
-| AM rebalancing cost | 영업 종료 후 추정 위치에서 다음날 04:00 목표 배치로 옮기는 scooter-km 비용 차감 |
+| imbalance penalty | 유출입 차이가 큰 곳은 기본 운영비 KRW 증가 |
+| AM rebalancing cost | 영업 종료 후 추정 위치에서 다음날 04:00 목표 배치로 옮기는 비용을 KRW로 차감 |
 | district fairness | 특정 구에만 모든 fleet이 몰리지 않도록 구별 최소/최대 비중 설정 가능 |
 | scenario robustness | 특정 날짜 하루가 아니라 여러 operating day 평균 또는 하위 분위 수익에도 견디는 배치 선택 |
 
@@ -452,9 +458,9 @@ x_i integer
 
 ```text
 maximize:
-  expected_profit(x)
-  - eta_unmet * sum_i_s u_is
-  - relocation_cost
+  expected_profit_krw(x)
+  - unmet_demand_penalty_krw_per_ride * sum_i_s u_is
+  - rebalancing_cost_krw(x)
 ```
 
 서울 따릉이 pivot이 적합한 경우:
@@ -612,9 +618,10 @@ python3 src/visualize.py --input outputs/model --out outputs/visualizations --ma
 | `mean_competitor_count` | 행정동별 평균 경쟁사 PM 수 |
 | `mean_gcoo_count` | 행정동별 평균 관측 GCOO PM 수 |
 | `K_i` | 최적화 모델에서 사용한 행정동 용량 |
-| `expected_rebalancing_km` | 영업 종료 추정 분포에서 다음날 04:00 배치로 되돌리는 총 scooter-km |
-| `expected_rebalancing_cost` | `expected_rebalancing_km * rebalancing_cost_per_scooter_km` |
-| `expected_profit_after_rebalancing` | 영업이익에서 재배치 비용을 차감한 목적함수 값 |
+| `expected_operating_profit_krw` | 재배치 전 기대 영업이익 KRW |
+| `expected_rebalancing_cost_krw` | 04:00 재배치 비용 KRW |
+| `expected_profit_after_rebalancing_krw` | 영업이익 KRW에서 재배치 비용 KRW를 차감한 목적함수 값 |
+| `rebalancing_krw_per_scooter_km` | scooter 1대를 1km 재배치하는 원화 단가 |
 | `B_i` | 도착/출발 기반 불균형 점수 |
 
 ### 6. 브라우저에서 시각화 열기
