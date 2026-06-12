@@ -346,6 +346,8 @@ def run(args: argparse.Namespace) -> int:
             Path(args.processed_dir),
             Path(args.visualization_dir),
             args.max_visualization_markers,
+            args.max_visualization_ride_segments,
+            args.max_visualization_od_lines,
         )
         summary["visualization"] = {
             "charts_dashboard": visualization["charts_dashboard"],
@@ -368,6 +370,8 @@ def main() -> None:
     parser.add_argument("--processed-dir", default="data/processed/sejong_tago")
     parser.add_argument("--visualization-dir", default="outputs/visualizations")
     parser.add_argument("--max-visualization-markers", type=int, default=1500)
+    parser.add_argument("--max-visualization-ride-segments", type=int, default=1000)
+    parser.add_argument("--max-visualization-od-lines", type=int, default=120)
     parser.add_argument("--zone-size-m", type=int, default=500)
     parser.add_argument("--lock-file", default="data/raw/sejong_tago_collect.lock")
     parser.add_argument("--skip-fetch", action="store_true", help="Only rebuild processed outputs from existing raw CSVs.")
