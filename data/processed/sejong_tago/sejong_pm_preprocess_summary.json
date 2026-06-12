@@ -1,24 +1,24 @@
 {
   "ok": true,
-  "created_at": "2026-06-12T06:47:09+09:00",
-  "raw_file_count": 3,
-  "snapshot_count": 3,
-  "row_count": 12495,
-  "latest_timestamp": "2026-06-12T06:47:08+0900",
+  "created_at": "2026-06-12T20:30:27+09:00",
+  "raw_file_count": 63,
+  "snapshot_count": 63,
+  "row_count": 262393,
+  "latest_timestamp": "2026-06-12T20:30:11+0900",
   "latest_device_count": 4165,
   "latest_effective_device_count": 4165,
   "operator_counts_latest": {
     "ALPACA": 1368,
     "GBIKE": 2797
   },
-  "device_interval_count": 8330,
-  "moved_50m_interval_count": 31,
-  "moved_200m_interval_count": 29,
+  "device_interval_count": 258228,
+  "moved_50m_interval_count": 2493,
+  "moved_200m_interval_count": 2397,
   "zone_size_m": 500,
   "grid": {
     "lat_step": 0.0044915558749550845,
-    "lon_step": 0.00558724123081862,
-    "reference_latitude": 36.496316
+    "lon_step": 0.0055871895015038855,
+    "reference_latitude": 36.495599
   },
   "outputs": {
     "accumulated": "/root/gcoo-optimization/data/processed/sejong_tago/sejong_pm_snapshots_accumulated.csv",
