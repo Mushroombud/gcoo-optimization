@@ -1,0 +1,241 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Sejong Optimization Model</title>
+  <style>
+    :root {
+      --ink: #172033;
+      --muted: #5d687a;
+      --line: #d9e0ea;
+      --panel: #ffffff;
+      --bg: #f4f6f8;
+      --green: #0f766e;
+      --blue: #2563eb;
+      --amber: #b45309;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: var(--bg); color: var(--ink); font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    header { background: #ffffff; border-bottom: 1px solid var(--line); }
+    .hero { max-width: 1240px; margin: 0 auto; padding: 28px 20px 24px; display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(280px, .6fr); gap: 20px; align-items: end; }
+    h1 { margin: 0 0 10px; font-size: 30px; line-height: 1.18; }
+    h2, h3 { margin: 0 0 12px; }
+    p { color: var(--muted); line-height: 1.62; margin: 0; }
+    a { color: var(--green); font-weight: 700; text-decoration: none; }
+    .navlink { justify-self: end; border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; background: #fff; white-space: nowrap; }
+    main { max-width: 1240px; margin: 0 auto; padding: 22px 20px 48px; }
+    .grid { display: grid; gap: 16px; }
+    .two { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+    .three { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .card { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 18px; box-shadow: 0 8px 24px rgba(23, 32, 51, .05); }
+    .result { border-left: 5px solid var(--green); }
+    .metric { border-top: 1px solid var(--line); padding-top: 12px; }
+    .metric .label { color: var(--muted); font-size: 13px; }
+    .metric .value { font-size: 28px; font-weight: 800; margin-top: 4px; }
+    .formula { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; background: #0f172a; color: #e2e8f0; border-radius: 8px; padding: 16px; overflow-x: auto; line-height: 1.62; font-size: 14px; }
+    table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    th, td { border-bottom: 1px solid var(--line); padding: 9px 8px; text-align: right; vertical-align: top; }
+    th:first-child, td:first-child { text-align: left; }
+    th { color: var(--muted); font-size: 12px; background: #f8fafc; position: sticky; top: 0; }
+    code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    .table-wrap { max-height: 520px; overflow: auto; border: 1px solid var(--line); border-radius: 8px; }
+    .viz-svg { width: 100%; height: auto; display: block; }
+    .svg-title { font: 700 18px system-ui, sans-serif; fill: #172033; }
+    .svg-label { font: 500 12px system-ui, sans-serif; fill: #5d687a; }
+    .svg-value { font: 700 12px system-ui, sans-serif; fill: #172033; }
+    iframe { width: 100%; height: 620px; border: 1px solid var(--line); border-radius: 8px; background: #fff; }
+    .note { color: var(--muted); font-size: 13px; margin-top: 8px; }
+    @media (max-width: 920px) { .hero, .two, .three { grid-template-columns: 1fr; } .navlink { justify-self: start; } iframe { height: 500px; } }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="hero">
+      <div>
+        <h1>Sejong GBIKE 04:00 Deployment Optimization</h1>
+        <p>이 페이지는 Sejong TAGO PM 데이터를 이용해 Solver에 넣을 수 있는 Optimization Model을 보여줍니다. 핵심은 decision variable <code>xᵢ</code>, objective function, constraints, 그리고 최종 배치 결과 <code>x*</code>입니다.</p>
+      </div>
+      <a class="navlink" href="./index.html">Visualization index</a>
+    </div>
+  </header>
+  <main>
+    <section class="grid two">
+      <div class="card">
+        <h2>1. Solver에 넣는 Model</h2>
+        <div class="formula">Decision variable 의사결정변수
+  xᵢ = 04:00에 zone i에 배치할 GBIKE PM 수
+
+Objective 목적함수
+  maximize Σᵢ [(pᵢ-v)Qᵢ(xᵢ) - cᵢxᵢ - rᵢ(xᵢ)]
+
+Non-linear demand 비선형 수요
+  Qᵢ(xᵢ) = min &#123; Aᵢ[1-exp(-βxᵢ/(1+θCᵢ))], Uxᵢ &#125;
+
+Adjusted demand 보정 수요
+  Aᵢ = Dᵢ(1 + λ log(1+Cᵢ)/log(1+Cmax))</div>
+      </div>
+      <div class="card result">
+        <h2>2. 이번 Run의 최종 결과</h2>
+        <div class="grid three">
+          <div class="metric"><div class="label">배치 fleet</div><div class="value">500</div></div>
+          <div class="metric"><div class="label">활성 zone</div><div class="value">67</div></div>
+          <div class="metric"><div class="label">기대 rides</div><div class="value">1,938.5</div></div>
+        </div>
+        <div class="grid three" style="margin-top:14px;">
+          <div class="metric"><div class="label">기대 revenue 운행매출</div><div class="value">4,264,728</div></div>
+          <div class="metric"><div class="label">기대 total cost</div><div class="value">3,569,459</div></div>
+          <div class="metric"><div class="label">Objective value</div><div class="value">695,270</div></div>
+        </div>
+        <p class="note">이번 dashboard는 <code>Σᵢxᵢ = 500</code> planning constraint를 둔 결과입니다. 최상위 배치 zone은 <code>grid_8123_22776</code>입니다.</p>
+      </div>
+    </section>
+
+    <section class="grid two" style="margin-top:16px;">
+      <div class="card">
+        <h2>Decision Variables 의사결정변수</h2>
+        <div class="table-wrap"><table><thead><tr><th>Variable</th><th>Domain</th><th>의미</th></tr></thead><tbody><tr><td>xᵢ</td><td>integer 또는 continuous</td><td>04:00에 zone i에 배치할 GBIKE PM 수</td></tr><tr><td>Qᵢₛ</td><td>continuous</td><td>scenario s에서 zone i가 처리하는 기대 ride 수</td></tr><tr><td>rᵢ</td><td>continuous</td><td>zone i에서 발생하는 기대 rebalancing cost</td></tr></tbody></table></div>
+      </div>
+      <div class="card">
+        <h2>Constraints 제약조건</h2>
+        <div class="table-wrap"><table><thead><tr><th>Constraint</th><th>식</th><th>이유</th></tr></thead><tbody><tr><td>Fleet</td><td><code>Σᵢ xᵢ = 500</code></td><td>이번 dashboard run에서는 500대를 반드시 배치하는 planning problem으로 둠</td></tr><tr><td>Capacity</td><td><code>0 ≤ xᵢ ≤ Kᵢ</code></td><td>각 500m zone의 물리적/운영적 수용량</td></tr><tr><td>Demand capture</td><td><code>Qᵢₛ ≤ Aᵢₛ[1-exp(-βxᵢ/(1+θCᵢₛ))]</code></td><td>배치량 증가의 체감효과와 경쟁 압력</td></tr><tr><td>Device throughput</td><td><code>Qᵢₛ ≤ Uxᵢ</code></td><td>PM 1대가 하루 처리할 수 있는 최대 ride 수</td></tr><tr><td>Non-negativity</td><td><code>xᵢ, Qᵢₛ, rᵢ ≥ 0</code></td><td>음수 배치나 음수 수요를 방지</td></tr></tbody></table></div>
+      </div>
+    </section>
+
+    <section class="grid two" style="margin-top:16px;">
+      <div class="card"><svg class="viz-svg" viewBox="0 0 900 544" role="img" aria-label="optimized allocation by zone">
+<text x="0" y="22" class="svg-title">최종 결과: x*가 큰 상위 zone</text>
+<text x="0" y="60" class="svg-label">grid_8123_22776</text>
+<rect x="172" y="47" width="580.0" height="17" rx="3" fill="#0f766e" opacity="0.86"></rect>
+<text x="762.0" y="60" class="svg-value">x*=48</text>
+<text x="0" y="90" class="svg-label">grid_8150_22782</text>
+<rect x="172" y="77" width="422.9" height="17" rx="3" fill="#0f766e" opacity="0.86"></rect>
+<text x="604.9" y="90" class="svg-value">x*=35</text>
+<text x="0" y="120" class="svg-label">grid_8128_22777</text>
+<rect x="172" y="107" width="205.4" height="17" rx="3" fill="#0f766e" opacity="0.86"></rect>
+<text x="387.4" y="120" class="svg-value">x*=17</text>
+<text x="0" y="150" class="svg-label">grid_8129_22778</text>
+<rect x="172" y="137" width="181.2" height="17" rx="3" fill="#0f766e" opacity="0.86"></rect>
+<text x="363.2" y="150" class="svg-value">x*=15</text>
+<text x="0" y="180" class="svg-label">grid_8121_22775</text>
+<rect x="172" y="167" width="181.2" height="17" rx="3" fill="#0f766e" opacity="0.86"></rect>
+<text x="363.2" y="180" class="svg-value">x*=15</text>
+<text x="0" y="210" class="svg-label">grid_8121_22777</text>
+<rect x="172" y="197" width="181.2" height="17" rx="3" fill="#0f766e" opacity="0.86"></rect>
+<text x="363.2" y="210" class="svg-value">x*=15</text>
+<text x="0" y="240" class="svg-label">grid_8130_22775</text>
+<rect x="172" y="227" width="169.2" height="17" rx="3" fill="#0f766e" opacity="0.86"></rect>
+<text x="351.2" y="240" class="svg-value">x*=14</text>
+<text x="0" y="270" class="svg-label">grid_8122_22784</text>
+<rect x="172" y="257" width="169.2" height="17" rx="3" fill="#0f766e" opacity="0.86"></rect>
+<text x="351.2" y="270" class="svg-value">x*=14</text>
+<text x="0" y="300" class="svg-label">grid_8120_22776</text>
+<rect x="172" y="287" width="169.2" height="17" rx="3" fill="#0f766e" opacity="0.86"></rect>
+<text x="351.2" y="300" class="svg-value">x*=14</text>
+<text x="0" y="330" class="svg-label">grid_8129_22772</text>
+<rect x="172" y="317" width="157.1" height="17" rx="3" fill="#0f766e" opacity="0.86"></rect>
+<text x="339.1" y="330" class="svg-value">x*=13</text>
+<text x="0" y="360" class="svg-label">grid_8130_22772</text>
+<rect x="172" y="347" width="157.1" height="17" rx="3" fill="#0f766e" opacity="0.86"></rect>
+<text x="339.1" y="360" class="svg-value">x*=13</text>
+<text x="0" y="390" class="svg-label">grid_8133_22777</text>
+<rect x="172" y="377" width="157.1" height="17" rx="3" fill="#0f766e" opacity="0.86"></rect>
+<text x="339.1" y="390" class="svg-value">x*=13</text>
+<text x="0" y="420" class="svg-label">grid_8126_22774</text>
+<rect x="172" y="407" width="157.1" height="17" rx="3" fill="#0f766e" opacity="0.86"></rect>
+<text x="339.1" y="420" class="svg-value">x*=13</text>
+<text x="0" y="450" class="svg-label">grid_8128_22774</text>
+<rect x="172" y="437" width="145.0" height="17" rx="3" fill="#0f766e" opacity="0.86"></rect>
+<text x="327.0" y="450" class="svg-value">x*=12</text>
+<text x="0" y="480" class="svg-label">grid_8125_22774</text>
+<rect x="172" y="467" width="145.0" height="17" rx="3" fill="#0f766e" opacity="0.86"></rect>
+<text x="327.0" y="480" class="svg-value">x*=12</text>
+<text x="0" y="510" class="svg-label">grid_8123_22778</text>
+<rect x="172" y="497" width="145.0" height="17" rx="3" fill="#0f766e" opacity="0.86"></rect>
+<text x="327.0" y="510" class="svg-value">x*=12</text>
+</svg></div>
+      <div class="card"><svg class="viz-svg" viewBox="0 0 900 320" role="img" aria-label="objective decomposition">
+<text x="0" y="24" class="svg-title">Objective value 분해: 운행매출 - 비용</text>
+<line x1="450" y1="42" x2="450" y2="264" stroke="#94a3b8"></line>
+<text x="0" y="73" class="svg-label">Ride revenue 운행매출</text>
+<rect x="450.0" y="58" width="330.0" height="20" rx="3" fill="#0f766e" opacity="0.82"></rect>
+<text x="160" y="73" class="svg-value">4,264,728 KRW</text>
+<text x="0" y="115" class="svg-label">Variable cost 변동비</text>
+<rect x="405.0" y="100" width="45.0" height="20" rx="3" fill="#b45309" opacity="0.82"></rect>
+<text x="160" y="115" class="svg-value">-581,554 KRW</text>
+<text x="0" y="157" class="svg-label">Fixed cost 고정비</text>
+<rect x="353.3" y="142" width="96.7" height="20" rx="3" fill="#be123c" opacity="0.82"></rect>
+<text x="160" y="157" class="svg-value">-1,250,000 KRW</text>
+<text x="0" y="199" class="svg-label">Rebalancing cost 재배치비</text>
+<rect x="315.5" y="184" width="134.5" height="20" rx="3" fill="#2563eb" opacity="0.82"></rect>
+<text x="160" y="199" class="svg-value">-1,737,905 KRW</text>
+<text x="0" y="241" class="svg-label">Net profit 순이익</text>
+<rect x="450.0" y="226" width="53.8" height="20" rx="3" fill="#172033" opacity="0.82"></rect>
+<text x="160" y="241" class="svg-value">695,270 KRW</text>
+</svg></div>
+    </section>
+
+    <section class="card" style="margin-top:16px;">
+      <h2>최적 배치 지도: x*</h2>
+      <p>지도는 Solver-style output인 <code>x*</code>를 zone별로 보여줍니다. 원 크기는 배치량, 색상은 zone별 profit 부호입니다.</p>
+      <iframe src="./optimization_model_map.html" title="Optimization result map"></iframe>
+    </section>
+
+    <section class="grid two" style="margin-top:16px;">
+      <div class="card"><svg class="viz-svg" viewBox="0 0 900 330" role="img" aria-label="demand capture curve">
+<text x="0" y="24" class="svg-title">Non-linear demand capture: xᵢ가 커질수록 한계효과가 체감</text>
+<line x1="58" y1="282" x2="833" y2="282" stroke="#94a3b8"></line>
+<line x1="58" y1="282" x2="58" y2="67" stroke="#94a3b8"></line>
+<text x="745" y="310" class="svg-label">배치량 xᵢ</text>
+<text x="0" y="79" class="svg-label">기대 rides Qᵢ</text>
+<polyline points="58.0,282.0 67.7,271.2 77.4,260.5 87.1,249.8 96.8,239.0 106.4,228.2 116.1,217.5 125.8,206.8 135.5,196.0 145.2,185.2 154.9,174.5 164.6,163.8 174.2,153.0 183.9,143.0 193.6,137.2 203.3,131.8 213.0,126.8 222.7,122.2 232.4,117.9 242.1,114.0 251.8,110.4 261.4,107.1 271.1,104.0 280.8,101.1 290.5,98.5 300.2,96.1 309.9,93.9 319.6,91.8 329.2,89.9 338.9,88.1 348.6,86.5 358.3,85.0 368.0,83.6 377.7,82.3 387.4,81.2 397.1,80.1 406.8,79.1 416.4,78.1 426.1,77.3 435.8,76.5 445.5,75.8 455.2,75.1 464.9,74.5 474.6,73.9 484.2,73.4 493.9,72.9 503.6,72.4 513.3,72.0 523.0,71.6 532.7,71.3 542.4,70.9 552.1,70.6 561.8,70.4 571.4,70.1 581.1,69.9 590.8,69.6 600.5,69.4 610.2,69.2 619.9,69.1 629.6,68.9 639.2,68.8 648.9,68.6 658.6,68.5 668.3,68.4 678.0,68.3 687.7,68.2 697.4,68.1 707.1,68.0 716.8,67.9 726.4,67.9 736.1,67.8 745.8,67.7 755.5,67.7 765.2,67.6 774.9,67.6 784.6,67.5 794.2,67.5 803.9,67.5 813.6,67.4 823.3,67.4 833.0,67.4" fill="none" stroke="#0f766e" stroke-width="3"></polyline>
+<polyline points="58.0,282.0 67.7,280.4 77.4,278.9 87.1,277.4 96.8,275.8 106.4,274.3 116.1,272.8 125.8,271.3 135.5,269.8 145.2,268.4 154.9,266.9 164.6,265.5 174.2,264.0 183.9,262.6 193.6,261.2 203.3,259.8 213.0,258.4 222.7,257.0 232.4,255.6 242.1,254.3 251.8,252.9 261.4,251.5 271.1,250.2 280.8,248.9 290.5,247.6 300.2,246.3 309.9,245.0 319.6,243.7 329.2,242.4 338.9,241.1 348.6,239.9 358.3,238.6 368.0,237.4 377.7,236.1 387.4,234.9 397.1,233.7 406.8,232.5 416.4,231.3 426.1,230.1 435.8,228.9 445.5,227.7 455.2,226.6 464.9,225.4 474.6,224.3 484.2,223.1 493.9,222.0 503.6,220.9 513.3,219.8 523.0,218.6 532.7,217.5 542.4,216.5 552.1,215.4 561.8,214.3 571.4,213.2 581.1,212.2 590.8,211.1 600.5,210.1 610.2,209.0 619.9,208.0 629.6,207.0 639.2,206.0 648.9,205.0 658.6,204.0 668.3,203.0 678.0,202.0 687.7,201.0 697.4,200.0 707.1,199.1 716.8,198.1 726.4,197.2 736.1,196.2 745.8,195.3 755.5,194.4 765.2,193.4 774.9,192.5 784.6,191.6 794.2,190.7 803.9,189.8 813.6,188.9 823.3,188.0 833.0,187.2" fill="none" stroke="#2563eb" stroke-width="3"></polyline>
+<polyline points="58.0,282.0 67.7,281.6 77.4,281.2 87.1,280.7 96.8,280.3 106.4,279.9 116.1,279.5 125.8,279.1 135.5,278.7 145.2,278.3 154.9,277.8 164.6,277.4 174.2,277.0 183.9,276.6 193.6,276.2 203.3,275.8 213.0,275.4 222.7,275.0 232.4,274.6 242.1,274.2 251.8,273.8 261.4,273.4 271.1,273.0 280.8,272.6 290.5,272.2 300.2,271.8 309.9,271.4 319.6,271.0 329.2,270.6 338.9,270.2 348.6,269.8 358.3,269.4 368.0,269.0 377.7,268.6 387.4,268.2 397.1,267.8 406.8,267.4 416.4,267.0 426.1,266.6 435.8,266.2 445.5,265.9 455.2,265.5 464.9,265.1 474.6,264.7 484.2,264.3 493.9,263.9 503.6,263.5 513.3,263.2 523.0,262.8 532.7,262.4 542.4,262.0 552.1,261.6 561.8,261.3 571.4,260.9 581.1,260.5 590.8,260.1 600.5,259.7 610.2,259.4 619.9,259.0 629.6,258.6 639.2,258.2 648.9,257.9 658.6,257.5 668.3,257.1 678.0,256.8 687.7,256.4 697.4,256.0 707.1,255.7 716.8,255.3 726.4,254.9 736.1,254.6 745.8,254.2 755.5,253.8 765.2,253.5 774.9,253.1 784.6,252.7 794.2,252.4 803.9,252.0 813.6,251.6 823.3,251.3 833.0,250.9" fill="none" stroke="#b45309" stroke-width="3"></polyline>
+<polyline points="58.0,282.0 67.7,281.8 77.4,281.7 87.1,281.5 96.8,281.3 106.4,281.2 116.1,281.0 125.8,280.8 135.5,280.6 145.2,280.5 154.9,280.3 164.6,280.1 174.2,280.0 183.9,279.8 193.6,279.6 203.3,279.5 213.0,279.3 222.7,279.1 232.4,279.0 242.1,278.8 251.8,278.6 261.4,278.5 271.1,278.3 280.8,278.1 290.5,278.0 300.2,277.8 309.9,277.6 319.6,277.5 329.2,277.3 338.9,277.1 348.6,277.0 358.3,276.8 368.0,276.6 377.7,276.5 387.4,276.3 397.1,276.1 406.8,276.0 416.4,275.8 426.1,275.6 435.8,275.5 445.5,275.3 455.2,275.1 464.9,275.0 474.6,274.8 484.2,274.6 493.9,274.5 503.6,274.3 513.3,274.1 523.0,274.0 532.7,273.8 542.4,273.7 552.1,273.5 561.8,273.3 571.4,273.2 581.1,273.0 590.8,272.8 600.5,272.7 610.2,272.5 619.9,272.3 629.6,272.2 639.2,272.0 648.9,271.9 658.6,271.7 668.3,271.5 678.0,271.4 687.7,271.2 697.4,271.0 707.1,270.9 716.8,270.7 726.4,270.6 736.1,270.4 745.8,270.2 755.5,270.1 765.2,269.9 774.9,269.8 784.6,269.6 794.2,269.4 803.9,269.3 813.6,269.1 823.3,269.0 833.0,268.8" fill="none" stroke="#be123c" stroke-width="3"></polyline>
+<rect x="628" y="42" width="16" height="4" fill="#0f766e"></rect>
+<text x="650" y="47" class="svg-label">ALPACA Cᵢ=0</text>
+<rect x="628" y="65" width="16" height="4" fill="#2563eb"></rect>
+<text x="650" y="70" class="svg-label">ALPACA Cᵢ=10</text>
+<rect x="628" y="88" width="16" height="4" fill="#b45309"></rect>
+<text x="650" y="93" class="svg-label">ALPACA Cᵢ=40</text>
+<rect x="628" y="111" width="16" height="4" fill="#be123c"></rect>
+<text x="650" y="116" class="svg-label">ALPACA Cᵢ=100</text>
+</svg></div>
+      <div class="card"><svg class="viz-svg" viewBox="0 0 900 300" role="img" aria-label="simulation profit distribution">
+<text x="0" y="24" class="svg-title">Simulation: demand/cost shock가 있을 때 Objective value 분포</text>
+<line x1="54" y1="250" x2="834" y2="250" stroke="#94a3b8"></line>
+<rect x="54.0" y="111.8" width="39.6" height="138.2" rx="3" fill="#0f766e" opacity="0.74"></rect>
+<rect x="97.6" y="180.9" width="39.6" height="69.1" rx="3" fill="#0f766e" opacity="0.74"></rect>
+<rect x="141.1" y="129.1" width="39.6" height="120.9" rx="3" fill="#0f766e" opacity="0.74"></rect>
+<rect x="184.7" y="94.5" width="39.6" height="155.5" rx="3" fill="#0f766e" opacity="0.74"></rect>
+<rect x="228.2" y="129.1" width="39.6" height="120.9" rx="3" fill="#0f766e" opacity="0.74"></rect>
+<rect x="271.8" y="60.0" width="39.6" height="190.0" rx="3" fill="#0f766e" opacity="0.74"></rect>
+<rect x="315.3" y="129.1" width="39.6" height="120.9" rx="3" fill="#0f766e" opacity="0.74"></rect>
+<rect x="358.9" y="146.4" width="39.6" height="103.6" rx="3" fill="#0f766e" opacity="0.74"></rect>
+<rect x="402.4" y="129.1" width="39.6" height="120.9" rx="3" fill="#0f766e" opacity="0.74"></rect>
+<rect x="446.0" y="198.2" width="39.6" height="51.8" rx="3" fill="#0f766e" opacity="0.74"></rect>
+<rect x="489.6" y="129.1" width="39.6" height="120.9" rx="3" fill="#0f766e" opacity="0.74"></rect>
+<rect x="533.1" y="111.8" width="39.6" height="138.2" rx="3" fill="#0f766e" opacity="0.74"></rect>
+<rect x="576.7" y="111.8" width="39.6" height="138.2" rx="3" fill="#0f766e" opacity="0.74"></rect>
+<rect x="620.2" y="94.5" width="39.6" height="155.5" rx="3" fill="#0f766e" opacity="0.74"></rect>
+<rect x="663.8" y="198.2" width="39.6" height="51.8" rx="3" fill="#0f766e" opacity="0.74"></rect>
+<rect x="707.3" y="111.8" width="39.6" height="138.2" rx="3" fill="#0f766e" opacity="0.74"></rect>
+<rect x="750.9" y="180.9" width="39.6" height="69.1" rx="3" fill="#0f766e" opacity="0.74"></rect>
+<rect x="794.4" y="180.9" width="39.6" height="69.1" rx="3" fill="#0f766e" opacity="0.74"></rect>
+<line x1="135.3" y1="60" x2="135.3" y2="250" stroke="#be123c" stroke-width="2" stroke-dasharray="4 4"></line>
+<text x="140.3" y="78" class="svg-label">P10: -60,897 KRW</text>
+<line x1="411.7" y1="60" x2="411.7" y2="250" stroke="#2563eb" stroke-width="2" stroke-dasharray="4 4"></line>
+<text x="416.7" y="78" class="svg-label">P50: 635,017 KRW</text>
+<line x1="733.8" y1="60" x2="733.8" y2="250" stroke="#0f766e" stroke-width="2" stroke-dasharray="4 4"></line>
+<text x="738.8" y="78" class="svg-label">P90: 1,445,856 KRW</text>
+</svg></div>
+    </section>
+
+    <section class="card" style="margin-top:16px;">
+      <h2>Solution Table 최종 결과표</h2>
+      <p>아래 표는 최종 배치량 <code>x*</code>, 해당 배치에서의 기대 ride <code>Q(x*)</code>, 경쟁 공급 <code>Cᵢ</code>, capacity <code>Kᵢ</code>, zone별 objective contribution을 함께 보여줍니다.</p>
+      <div class="table-wrap"><table><thead><tr><th>Zone</th><th>x*</th><th>Q(x*)</th><th>현재 GBIKE</th><th>ALPACA</th><th>Aᵢ</th><th>Profit</th><th>Rides/device</th></tr></thead><tbody><tr><td>grid_8123_22776</td><td>48</td><td>287.68</td><td>42</td><td>0</td><td>294.00</td><td>200,949</td><td>5.99</td></tr><tr><td>grid_8150_22782</td><td>35</td><td>53.01</td><td>73</td><td>6</td><td>160.79</td><td>-13,255</td><td>1.51</td></tr><tr><td>grid_8128_22777</td><td>17</td><td>62.44</td><td>43</td><td>0</td><td>84.00</td><td>19,953</td><td>3.67</td></tr><tr><td>grid_8129_22778</td><td>15</td><td>41.93</td><td>14</td><td>0</td><td>60.00</td><td>12,075</td><td>2.80</td></tr><tr><td>grid_8121_22775</td><td>15</td><td>53.81</td><td>31</td><td>0</td><td>77.00</td><td>11,255</td><td>3.59</td></tr><tr><td>grid_8121_22777</td><td>15</td><td>47.52</td><td>22</td><td>0</td><td>68.00</td><td>10,513</td><td>3.17</td></tr><tr><td>grid_8130_22775</td><td>14</td><td>43.12</td><td>18</td><td>0</td><td>64.00</td><td>9,697</td><td>3.08</td></tr><tr><td>grid_8122_22784</td><td>14</td><td>39.08</td><td>12</td><td>0</td><td>58.00</td><td>7,987</td><td>2.79</td></tr><tr><td>grid_8120_22776</td><td>14</td><td>51.88</td><td>21</td><td>0</td><td>77.00</td><td>7,890</td><td>3.71</td></tr><tr><td>grid_8129_22772</td><td>13</td><td>34.27</td><td>15</td><td>0</td><td>53.00</td><td>8,116</td><td>2.64</td></tr><tr><td>grid_8130_22772</td><td>13</td><td>40.73</td><td>33</td><td>0</td><td>63.00</td><td>7,163</td><td>3.13</td></tr><tr><td>grid_8133_22777</td><td>13</td><td>31.03</td><td>12</td><td>0</td><td>48.00</td><td>6,731</td><td>2.39</td></tr><tr><td>grid_8126_22774</td><td>13</td><td>41.38</td><td>14</td><td>0</td><td>64.00</td><td>5,715</td><td>3.18</td></tr><tr><td>grid_8128_22774</td><td>12</td><td>72.00</td><td>53</td><td>0</td><td>215.00</td><td>41,655</td><td>6.00</td></tr><tr><td>grid_8125_22774</td><td>12</td><td>51.84</td><td>9</td><td>0</td><td>84.00</td><td>11,854</td><td>4.32</td></tr><tr><td>grid_8123_22778</td><td>12</td><td>33.32</td><td>26</td><td>0</td><td>54.00</td><td>5,719</td><td>2.78</td></tr><tr><td>grid_8124_22777</td><td>11</td><td>66.00</td><td>42</td><td>0</td><td>212.00</td><td>25,557</td><td>6.00</td></tr><tr><td>grid_8128_22773</td><td>11</td><td>31.60</td><td>24</td><td>0</td><td>54.00</td><td>2,906</td><td>2.87</td></tr><tr><td>grid_8129_22771</td><td>11</td><td>40.97</td><td>12</td><td>0</td><td>70.00</td><td>2,400</td><td>3.72</td></tr><tr><td>grid_8125_22777</td><td>10</td><td>24.78</td><td>11</td><td>0</td><td>45.00</td><td>1,413</td><td>2.48</td></tr><tr><td>grid_8123_22784</td><td>10</td><td>24.23</td><td>17</td><td>0</td><td>44.00</td><td>1,313</td><td>2.42</td></tr><tr><td>grid_8123_22777</td><td>7</td><td>42.00</td><td>41</td><td>0</td><td>194.00</td><td>25,591</td><td>6.00</td></tr><tr><td>grid_8127_22776</td><td>7</td><td>15.01</td><td>8</td><td>0</td><td>35.00</td><td>-892</td><td>2.14</td></tr><tr><td>grid_8126_22773</td><td>7</td><td>21.44</td><td>30</td><td>0</td><td>50.00</td><td>-1,830</td><td>3.06</td></tr></tbody></table></div>
+    </section>
+  </main>
+</body>
+</html>

@@ -13,6 +13,7 @@
       --panel: #ffffff;
       --seoul: #176b87;
       --sejong: #6d5f15;
+      --model: #0f766e;
     }
     * { box-sizing: border-box; }
     body {
@@ -22,7 +23,7 @@
       color: var(--ink);
     }
     main {
-      max-width: 980px;
+      max-width: 1080px;
       margin: 0 auto;
       padding: 48px 20px;
     }
@@ -40,6 +41,28 @@
     section {
       margin-top: 26px;
     }
+    .tabs {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      margin: 26px 0 8px;
+      border-bottom: 1px solid var(--line);
+    }
+    .tab {
+      min-height: 0;
+      padding: 10px 14px;
+      border: 1px solid var(--line);
+      border-bottom: 0;
+      border-radius: 8px 8px 0 0;
+      background: #eef3f6;
+      color: var(--muted);
+      box-shadow: none;
+      font-size: 14px;
+    }
+    .tab.active {
+      background: var(--panel);
+      color: var(--model);
+    }
     h2 {
       margin: 0 0 12px;
       font-size: 18px;
@@ -47,7 +70,7 @@
     }
     nav {
       display: grid;
-      grid-template-columns: repeat(2, minmax(0, 1fr));
+      grid-template-columns: repeat(3, minmax(0, 1fr));
       gap: 12px;
     }
     a {
@@ -75,9 +98,34 @@
       font-weight: 400;
     }
     .sejong a { color: var(--sejong); }
+    .model a { color: var(--model); }
+    .feature {
+      display: grid;
+      grid-template-columns: 1.1fr 0.9fr;
+      gap: 14px;
+      align-items: stretch;
+    }
+    .feature a {
+      min-height: 160px;
+      color: var(--model);
+    }
+    .formula {
+      margin: 0;
+      min-height: 160px;
+      padding: 16px 18px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #0f172a;
+      color: #e2e8f0;
+      overflow-x: auto;
+      line-height: 1.65;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 13px;
+      box-shadow: 0 8px 22px rgba(23, 32, 51, 0.05);
+    }
     @media (max-width: 680px) {
       main { padding: 34px 16px; }
-      nav { grid-template-columns: 1fr; }
+      nav, .feature { grid-template-columns: 1fr; }
       a { min-height: auto; }
     }
   </style>
@@ -85,7 +133,32 @@
 <body>
   <main>
     <h1>GCOO Mobility Visualizations</h1>
-    <p class="lead">수집된 서울 따릉이 데이터와 세종 TAGO PM 데이터를 함께 볼 수 있는 시각화 허브입니다.</p>
+    <p class="lead">수집된 PM 데이터를 지도, 차트, 최적화 모델 관점에서 함께 볼 수 있는 시각화 허브입니다.</p>
+
+    <div class="tabs" aria-label="Visualization tabs">
+      <a class="tab active" href="./optimization_model.html">Optimization Model</a>
+      <a class="tab" href="./sejong_map.html">Sejong Geo</a>
+      <a class="tab" href="./sejong_charts_dashboard.html">Sejong Charts</a>
+      <a class="tab" href="./seoul_map.html">Seoul Legacy</a>
+    </div>
+
+    <section class="model">
+      <h2>최적화 모델 시각화</h2>
+      <div class="feature">
+        <a href="./optimization_model.html">Optimization Model Tab 보기<span>Sejong TAGO 스냅샷을 500m grid의 공급량, 추정 수요, competition pressure, rebalancing 부담으로 변환해 모델과 최종 배치 결과를 보여줍니다.</span></a>
+        <pre class="formula">Qᵢₛ(xᵢ) = min {
+  Aᵢₛ · [1 - exp(-βxᵢ / (1 + θCᵢₛ))],
+  Uxᵢ
+}
+
+maximize Eₛ[Σᵢ(pᵢ-v)Qᵢₛ(xᵢ) - Σᵢcᵢxᵢ - Σᵢrᵢ(xᵢ)]</pre>
+      </div>
+      <nav style="margin-top:12px;">
+        <a href="./optimization_model_map.html">모델 지도 보기<span>Zone별 최적 배치량 x*, 기대 ride, zone별 profit을 지도에서 확인</span></a>
+        <a href="./optimization_model_data.json">모델 데이터 JSON<span>최종 배치 결과, 파라미터, 생성된 산출물 경로</span></a>
+        <a href="../../Data_Model_Sheet.md">Model Sheet Markdown<span>변수, 제약식, 목적함수, Simulation 설계 설명 원문</span></a>
+      </nav>
+    </section>
 
     <section class="seoul">
       <h2>서울시 따릉이 기반 시각화</h2>
