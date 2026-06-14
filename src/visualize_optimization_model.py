@@ -394,24 +394,58 @@ def svg_simulation(rows: pd.DataFrame) -> str:
 
 def decision_variable_table() -> str:
     rows = [
-        ("xᵢ", "integer 또는 continuous", "04:00에 zone i에 배치할 GBIKE PM 수"),
-        ("Qᵢₛ", "continuous", "scenario s에서 zone i가 처리하는 기대 ride 수"),
-        ("rᵢ", "continuous", "zone i에서 발생하는 기대 rebalancing cost"),
+        (r"\(x_i\)", r"\(x_i \in \mathbb{Z}_{+}\) 또는 \(x_i \ge 0\)", "04:00에 zone i에 배치할 GBIKE PM 수"),
+        (r"\(Q_{is}\)", r"\(Q_{is} \ge 0\)", "scenario s에서 zone i가 처리하는 기대 ride 수"),
+        (r"\(r_i(x_i)\)", r"\(r_i(x_i) \ge 0\)", "zone i에서 발생하는 기대 rebalancing cost"),
     ]
-    body = "".join(f"<tr><td>{safe(a)}</td><td>{safe(b)}</td><td>{safe(c)}</td></tr>" for a, b, c in rows)
+    body = "".join(f'<tr><td class="math-cell">{a}</td><td class="math-cell">{b}</td><td>{safe(c)}</td></tr>' for a, b, c in rows)
     return f"<table><thead><tr><th>Variable</th><th>Domain</th><th>의미</th></tr></thead><tbody>{body}</tbody></table>"
 
 
 def constraints_table(fleet_size: int) -> str:
     rows = [
-        ("Fleet", f"Σᵢ xᵢ = {fleet_size}", "이번 dashboard run에서는 500대를 반드시 배치하는 planning problem으로 둠"),
-        ("Capacity", "0 ≤ xᵢ ≤ Kᵢ", "각 500m zone의 물리적/운영적 수용량"),
-        ("Demand capture", "Qᵢₛ ≤ Aᵢₛ[1-exp(-βxᵢ/(1+θCᵢₛ))]", "배치량 증가의 체감효과와 경쟁 압력"),
-        ("Device throughput", "Qᵢₛ ≤ Uxᵢ", "PM 1대가 하루 처리할 수 있는 최대 ride 수"),
-        ("Non-negativity", "xᵢ, Qᵢₛ, rᵢ ≥ 0", "음수 배치나 음수 수요를 방지"),
+        ("Fleet", rf"\(\sum_i x_i = {fleet_size}\)", "이번 dashboard run에서는 500대를 반드시 배치하는 planning problem으로 둠"),
+        ("Capacity", r"\(0 \le x_i \le K_i\)", "각 500m zone의 물리적/운영적 수용량"),
+        ("Demand capture", r"\(Q_{is} \le A_{is}\left(1-e^{-\frac{\beta x_i}{1+\theta C_{is}}}\right)\)", "배치량 증가의 체감효과와 경쟁 압력"),
+        ("Device throughput", r"\(Q_{is} \le Ux_i\)", "PM 1대가 하루 처리할 수 있는 최대 ride 수"),
+        ("Non-negativity", r"\(x_i,\; Q_{is},\; r_i(x_i) \ge 0\)", "음수 배치나 음수 수요를 방지"),
     ]
-    body = "".join(f"<tr><td>{safe(a)}</td><td><code>{safe(b)}</code></td><td>{safe(c)}</td></tr>" for a, b, c in rows)
+    body = "".join(f'<tr><td>{safe(a)}</td><td class="math-cell">{b}</td><td>{safe(c)}</td></tr>' for a, b, c in rows)
     return f"<table><thead><tr><th>Constraint</th><th>식</th><th>이유</th></tr></thead><tbody>{body}</tbody></table>"
+
+
+def static_parameter_table(fleet_size: int) -> str:
+    rows = [
+        (r"\(F\)", fmt_int(fleet_size), "이번 run에서 배치할 전체 GBIKE PM 수"),
+        (r"\(\lambda\)", fmt_float(LAMBDA_MARKET, 2), "경쟁사 존재를 market validation으로 반영하는 강도"),
+        (r"\(\beta\)", fmt_float(BETA_CAPTURE, 2), "GBIKE 배치량이 수요 capture로 전환되는 속도"),
+        (r"\(\theta\)", fmt_float(THETA_COMPETITION, 2), "ALPACA 공급량이 GBIKE capture를 약화시키는 정도"),
+        (r"\(U\)", fmt_float(U_MAX_RIDES, 1), "PM 1대가 하루 처리 가능한 최대 ride 수"),
+        (r"\(p_i\)", f"{fmt_int(REVENUE_PER_RIDE_KRW)} KRW", "현재 dashboard에서는 zone 공통 ride 1건 평균 매출로 둠"),
+        (r"\(v\)", f"{fmt_int(VARIABLE_COST_KRW)} KRW", "ride 1건당 변동비"),
+        (r"\(c_i\)", f"{fmt_int(FIXED_COST_PER_DEVICE_KRW)} KRW/day", "PM 1대당 일 운영비"),
+        (r"\(\rho\)", f"{fmt_int(REBALANCING_KRW_PER_KM)} KRW/km", "재배치 거리 1km당 비용"),
+        (r"\(\kappa\)", fmt_float(CAPACITY_MULTIPLIER, 2), r"\(K_i\) 계산에 쓰는 zone capacity multiplier"),
+    ]
+    body = "".join(
+        f'<tr><td class="math-cell">{symbol}</td><td>{safe(value)}</td><td>{safe(note)}</td></tr>'
+        for symbol, value, note in rows
+    )
+    return f"<table><thead><tr><th>Parameter</th><th>현재 값</th><th>의미</th></tr></thead><tbody>{body}</tbody></table>"
+
+
+def data_parameter_table() -> str:
+    rows = [
+        (r"\(D_i\)", "inferred ride origin count", "GBIKE 이동 segment에서 추정한 zone별 기본 수요"),
+        (r"\(C_i\)", "latest ALPACA supply", "zone별 ALPACA 경쟁 공급량"),
+        (r"\(K_i\)", r"\(\lceil \kappa \cdot \text{current PM supply}_i \rceil\)", "zone별 최대 배치 가능량"),
+        (r"\(r_i(x_i)\)", "OD flow 기반", "이용 후 흩어진 PM을 회수/재배치하는 비용"),
+    ]
+    body = "".join(
+        f'<tr><td class="math-cell">{symbol}</td><td>{value}</td><td>{safe(note)}</td></tr>'
+        for symbol, value, note in rows
+    )
+    return f"<table><thead><tr><th>Parameter</th><th>계산 방식</th><th>의미</th></tr></thead><tbody>{body}</tbody></table>"
 
 
 def result_table(rows: pd.DataFrame) -> str:
@@ -506,6 +540,13 @@ def render_html(rows: pd.DataFrame, meta: dict[str, Any], solution: dict[str, An
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Sejong Optimization Model</title>
+  <script>
+    window.MathJax = {{
+      tex: {{ inlineMath: [['\\\\(', '\\\\)']], displayMath: [['\\\\[', '\\\\]']] }},
+      svg: {{ fontCache: 'global' }}
+    }};
+  </script>
+  <script defer src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-svg.js"></script>
   <style>
     :root {{
       --ink: #172033;
@@ -535,12 +576,26 @@ def render_html(rows: pd.DataFrame, meta: dict[str, Any], solution: dict[str, An
     .metric {{ border-top: 1px solid var(--line); padding-top: 12px; }}
     .metric .label {{ color: var(--muted); font-size: 13px; }}
     .metric .value {{ font-size: 28px; font-weight: 800; margin-top: 4px; }}
-    .formula {{ font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; background: #0f172a; color: #e2e8f0; border-radius: 8px; padding: 16px; overflow-x: auto; line-height: 1.62; font-size: 14px; }}
+    .formula-stack {{ display: grid; gap: 10px; margin-top: 12px; }}
+    .equation {{ background: #f8fafc; border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; }}
+    .equation b {{ display: block; margin-bottom: 6px; color: var(--green); }}
+    .equation .math {{ overflow-x: auto; font-size: 16px; }}
+    .equation-note {{ margin-top: 8px; color: var(--muted); line-height: 1.55; font-size: 13px; }}
+    .equation-note strong {{ color: var(--ink); }}
+    .explain {{ margin-top: 14px; display: grid; gap: 10px; }}
+    .explain-item {{ border: 1px solid var(--line); border-radius: 8px; padding: 12px 13px; background: #f8fafc; }}
+    .explain-item b {{ display: block; margin-bottom: 4px; }}
+    .explain-item span {{ color: var(--muted); line-height: 1.55; }}
+    .term-grid {{ display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-top: 12px; }}
+    .term {{ border-left: 3px solid var(--green); padding: 7px 9px; background: #f8fafc; font-size: 13px; line-height: 1.45; }}
+    .term code {{ font-weight: 800; }}
     table {{ width: 100%; border-collapse: collapse; font-size: 13px; }}
     th, td {{ border-bottom: 1px solid var(--line); padding: 9px 8px; text-align: right; vertical-align: top; }}
     th:first-child, td:first-child {{ text-align: left; }}
     th {{ color: var(--muted); font-size: 12px; background: #f8fafc; position: sticky; top: 0; }}
     code {{ font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }}
+    .compact-table th, .compact-table td {{ padding: 8px 7px; }}
+    .math-cell {{ min-width: 150px; }}
     .table-wrap {{ max-height: 520px; overflow: auto; border: 1px solid var(--line); border-radius: 8px; }}
     .viz-svg {{ width: 100%; height: auto; display: block; }}
     .svg-title {{ font: 700 18px system-ui, sans-serif; fill: #172033; }}
@@ -565,42 +620,68 @@ def render_html(rows: pd.DataFrame, meta: dict[str, Any], solution: dict[str, An
     <section class="grid two">
       <div class="card">
         <h2>1. Solver에 넣는 Model</h2>
-        <div class="formula">Decision variable 의사결정변수
-  xᵢ = 04:00에 zone i에 배치할 GBIKE PM 수
-
-Objective 목적함수
-  maximize Σᵢ [(pᵢ-v)Qᵢ(xᵢ) - cᵢxᵢ - rᵢ(xᵢ)]
-
-Non-linear demand 비선형 수요
-  Qᵢ(xᵢ) = min &#123; Aᵢ[1-exp(-βxᵢ/(1+θCᵢ))], Uxᵢ &#125;
-
-Adjusted demand 보정 수요
-  Aᵢ = Dᵢ(1 + λ log(1+Cᵢ)/log(1+Cmax))</div>
+        <div class="formula-stack">
+          <div class="equation">
+            <b>의사결정변수</b>
+            <div class="math">\\[x_i = \\text{{04:00에 zone }} i \\text{{에 배치할 GBIKE PM 수}}\\]</div>
+            <div class="equation-note">
+              <strong>해석:</strong> Solver가 직접 고르는 값입니다. 세종시를 500m grid zone으로 나눈 뒤, 각 zone <code>i</code>에 GBIKE PM을 몇 대 놓을지 결정합니다.
+              <br><strong>예:</strong> <code>x_i=20</code>이면 04:00에 해당 zone에 GBIKE PM 20대를 배치한다는 뜻입니다.
+            </div>
+          </div>
+          <div class="equation">
+            <b>목적함수: 기대 profit 최대화</b>
+            <div class="math">\\[\\max_x \\sum_i \\left[(p_i-v)Q_i(x_i)-c_i x_i-r_i(x_i)\\right]\\]</div>
+            <div class="equation-note">
+              <strong><code>(p_i-v)</code>:</strong> ride 1건당 순수 운행마진입니다. <code>p_i</code>는 zone <code>i</code>에서 ride 1건이 만드는 평균 매출이고, <code>v</code>는 결제/정비/소모품 등 ride 1건이 발생할 때 같이 증가하는 변동비입니다.
+              <br><strong><code>(p_i-v)Q_i(x_i)</code>:</strong> zone <code>i</code>에서 기대되는 총 운행이익입니다. 배치량 <code>x_i</code>가 커질수록 기대 ride 수 <code>Q_i(x_i)</code>가 늘어날 수 있으므로 이 항도 커질 수 있습니다.
+              <br><strong><code>-c_i x_i</code>:</strong> PM을 배치해두는 데 드는 일 운영비입니다. ride가 발생하지 않아도 PM을 현장에 두면 충전 관리, 보험/감가, 현장 관리, 민원 대응 같은 비용이 생기므로 배치 대수 <code>x_i</code>에 비례해 차감합니다.
+              <br><strong><code>-r_i(x_i)</code>:</strong> 이용 후 흩어진 PM을 다음 운영 시작 전에 다시 회수하거나 재배치하는 기대 비용입니다. OD flow가 불균형한 zone일수록 이 비용이 커질 수 있습니다.
+            </div>
+          </div>
+          <div class="equation">
+            <b>비선형 수요함수</b>
+            <div class="math">\\[Q_i(x_i)=\\min\\left\\{{A_i\\left(1-e^{{-\\frac{{\\beta x_i}}{{1+\\theta C_i}}}}\\right),\\;Ux_i\\right\\}}\\]</div>
+            <div class="equation-note">
+              <strong>모델링 근거:</strong> PM 배치량이 늘면 사용자가 가까운 기기를 발견할 확률이 커지지만, 그 효과는 포화됩니다. 그래서 접근성 효과를 <code>1-exp(-...)</code>로 둡니다. 이 함수는 처음에는 빠르게 증가하고, 이후에는 완만해지는 concave 형태입니다.
+              <br><strong>경쟁 반영:</strong> <code>C_i</code>는 ALPACA 공급량입니다. 경쟁 PM이 많을수록 같은 GBIKE 배치량 <code>x_i</code>의 수요 capture 효과가 약해지므로 분모에 <code>1+θC_i</code>를 넣었습니다.
+              <br><strong>운영 한계:</strong> 아무리 수요가 많아도 PM 1대가 하루 처리할 수 있는 ride 수는 제한되므로 <code>Ux_i</code>를 상한으로 둡니다.
+            </div>
+          </div>
+          <div class="equation">
+            <b>보정된 잠재수요</b>
+            <div class="math">\\[A_i=D_i\\left(1+\\lambda\\frac{{\\log(1+C_i)}}{{\\log(1+C_{{\\max}})}}\\right)\\]</div>
+            <div class="equation-note">
+              <strong>모델링 근거:</strong> <code>D_i</code>는 GBIKE device movement에서 추정한 기본 수요입니다. 하지만 경쟁사 PM이 많이 놓인 지역은 단순히 경쟁이 심한 곳일 뿐 아니라, PM 시장이 실제로 존재한다고 검증된 지역일 수도 있습니다.
+              <br><strong>왜 log인가:</strong> 경쟁사가 0대에서 10대로 늘어나는 것은 강한 시장 신호지만, 100대에서 110대로 늘어나는 것은 추가 정보가 상대적으로 작습니다. 그래서 <code>log(1+C_i)</code>를 사용해 market validation 효과도 체감하도록 설계했습니다.
+              <br><strong>λ의 의미:</strong> <code>λ</code>는 경쟁사 존재를 잠재수요 증가 신호로 얼마나 강하게 볼지 정하는 parameter입니다.
+            </div>
+          </div>
+        </div>
       </div>
       <div class="card result">
-        <h2>2. 이번 Run의 최종 결과</h2>
-        <div class="grid three">
-          <div class="metric"><div class="label">배치 fleet</div><div class="value">{fmt_int(solution['allocated_devices'])}</div></div>
-          <div class="metric"><div class="label">활성 zone</div><div class="value">{fmt_int(solution['active_zones'])}</div></div>
-          <div class="metric"><div class="label">기대 rides</div><div class="value">{fmt_float(solution['expected_rides'], 1)}</div></div>
-        </div>
-        <div class="grid three" style="margin-top:14px;">
-          <div class="metric"><div class="label">기대 revenue 운행매출</div><div class="value">{fmt_int(solution['expected_revenue_krw'])}</div></div>
-          <div class="metric"><div class="label">기대 total cost</div><div class="value">{fmt_int(solution['expected_variable_cost_krw'] + solution['expected_fixed_cost_krw'] + solution['expected_rebalancing_cost_krw'])}</div></div>
-          <div class="metric"><div class="label">Objective value</div><div class="value">{fmt_int(solution['expected_profit_krw'])}</div></div>
-        </div>
-        <p class="note">이번 dashboard는 <code>Σᵢxᵢ = {OPTIMIZATION_FLEET}</code> planning constraint를 둔 결과입니다. 최상위 배치 zone은 <code>{safe(best_zone)}</code>입니다.</p>
+        <h2>2. 변수와 제약조건 한눈에 보기</h2>
+        <h3>Decision Variables</h3>
+        <div class="table-wrap compact-table" style="max-height:none;">{decision_variable_table()}</div>
+        <h3 style="margin-top:16px;">Constraints</h3>
+        <div class="table-wrap compact-table" style="max-height:none;">{constraints_table(OPTIMIZATION_FLEET)}</div>
+        <h3 style="margin-top:16px;">Static Parameters 현재 설정값</h3>
+        <div class="table-wrap compact-table" style="max-height:none;">{static_parameter_table(OPTIMIZATION_FLEET)}</div>
+        <h3 style="margin-top:16px;">Data-derived Parameters 데이터에서 계산되는 값</h3>
+        <div class="table-wrap compact-table" style="max-height:none;">{data_parameter_table()}</div>
       </div>
     </section>
 
-    <section class="grid two" style="margin-top:16px;">
-      <div class="card">
-        <h2>Decision Variables 의사결정변수</h2>
-        <div class="table-wrap">{decision_variable_table()}</div>
-      </div>
-      <div class="card">
-        <h2>Constraints 제약조건</h2>
-        <div class="table-wrap">{constraints_table(OPTIMIZATION_FLEET)}</div>
+    <section class="card result" style="margin-top:16px;">
+      <h2>3. 이번 Run의 최종 결과</h2>
+      <p style="margin-bottom:14px;">위 모델에 <code>Σᵢxᵢ = {OPTIMIZATION_FLEET}</code>라는 fleet constraint를 걸고 계산한 배치 결과입니다. 최상위 배치 zone은 <code>{safe(best_zone)}</code>입니다.</p>
+      <div class="grid three">
+        <div class="metric"><div class="label">배치 fleet</div><div class="value">{fmt_int(solution['allocated_devices'])}</div></div>
+        <div class="metric"><div class="label">활성 zone</div><div class="value">{fmt_int(solution['active_zones'])}</div></div>
+        <div class="metric"><div class="label">기대 rides</div><div class="value">{fmt_float(solution['expected_rides'], 1)}</div></div>
+        <div class="metric"><div class="label">기대 revenue 운행매출</div><div class="value">{fmt_int(solution['expected_revenue_krw'])}</div></div>
+        <div class="metric"><div class="label">기대 total cost</div><div class="value">{fmt_int(solution['expected_variable_cost_krw'] + solution['expected_fixed_cost_krw'] + solution['expected_rebalancing_cost_krw'])}</div></div>
+        <div class="metric"><div class="label">Objective value</div><div class="value">{fmt_int(solution['expected_profit_krw'])}</div></div>
       </div>
     </section>
 
