@@ -318,6 +318,7 @@ def svg_capture_curve_korean() -> str:
     parts = [
         f'<svg class="viz-svg" viewBox="0 0 {width} {height}" role="img" aria-label="demand capture curve">',
         '<text x="0" y="24" class="svg-title">Non-linear demand capture: xᵢ가 커질수록 한계효과가 체감</text>',
+        '<text x="0" y="48" class="svg-label">잠재수요 Aᵢ=120으로 고정하고, 배치량 xᵢ와 경쟁 공급 Cᵢ가 기대 ride Qᵢ를 어떻게 바꾸는지 보여줍니다.</text>',
         f'<line x1="{left}" y1="{bottom}" x2="{left + plot_w}" y2="{bottom}" stroke="#94a3b8"></line>',
         f'<line x1="{left}" y1="{bottom}" x2="{left}" y2="{bottom - plot_h}" stroke="#94a3b8"></line>',
         f'<text x="{left + plot_w - 88}" y="{bottom + 28}" class="svg-label">배치량 xᵢ</text>',
@@ -336,7 +337,59 @@ def svg_capture_curve_korean() -> str:
     return "\n".join(parts)
 
 
-def svg_simulation(rows: pd.DataFrame) -> str:
+def capture_curve_panel() -> str:
+    return f"""
+      <h2>Non-linear demand capture 해석</h2>
+      <p>
+        이 그래프는 Solver 안의 수요식 <code>Q_i(x_i)</code>가 어떤 모양인지 보여줍니다.
+        핵심은 PM을 더 많이 놓을수록 기대 ride는 증가하지만, 추가 1대가 만드는 효과는 점점 작아진다는 점입니다.
+      </p>
+      {svg_capture_curve_korean()}
+      <div class="equation" style="margin-top:12px;">
+        <b>그래프에 쓰인 수요식</b>
+        <div class="math">\\[Q_i(x_i)=\\min\\left\\{{A_i\\left(1-e^{{-\\frac{{\\beta x_i}}{{1+\\theta C_i}}}}\\right),\\;Ux_i\\right\\}}\\]</div>
+        <div class="equation-note">
+          <strong>왼쪽 항:</strong> <code>A_i(1-exp(...))</code>는 zone의 잠재수요 중 GBIKE가 실제로 capture하는 ride 수입니다.
+          <br><strong>오른쪽 항:</strong> <code>Ux_i</code>는 PM 대수로 가능한 최대 처리량입니다. PM 1대가 하루에 처리할 수 있는 ride 수에는 물리적 한계가 있으므로 상한을 둡니다.
+          <br><strong>min을 쓰는 이유:</strong> 실제 기대 ride는 “수요가 만들어내는 ride”와 “기기가 처리할 수 있는 ride” 중 더 작은 값으로 제한됩니다.
+        </div>
+      </div>
+      <div class="simulation-grid">
+        <div class="sim-card">
+          <b>왜 비선형인가</b>
+          <span>처음 몇 대를 배치할 때는 사용자가 가까운 PM을 찾을 확률이 크게 올라갑니다. 하지만 이미 PM이 충분히 깔린 zone에서는 1대를 더 놓아도 접근성 개선폭이 작습니다. 그래서 직선이 아니라 위로 볼록한 concave curve가 됩니다.</span>
+        </div>
+        <div class="sim-card">
+          <b>왜 <code>1-exp(-...)</code>인가</b>
+          <span>이 형태는 “처음에는 빠르게 증가하고, 나중에는 1에 가까워지며 포화되는” 접근성/확률 모델입니다. 즉 배치량이 무한히 커져도 capture 비율은 100%를 넘을 수 없습니다.</span>
+        </div>
+        <div class="sim-card">
+          <b>ALPACA Cᵢ가 커질 때</b>
+          <span>그래프의 색상별 선은 경쟁 공급량 <code>C_i</code>가 다른 경우입니다. <code>C_i</code>가 커질수록 분모 <code>1+θC_i</code>가 커져 같은 <code>x_i</code>에서도 GBIKE가 잡는 수요가 줄어듭니다.</span>
+        </div>
+        <div class="sim-card">
+          <b>Solver 관점의 의미</b>
+          <span>Solver는 곡선이 가파른 구간의 zone에 PM을 먼저 배치하려고 합니다. 곡선이 이미 평평한 zone은 추가 배치의 marginal benefit이 작으므로, 비용을 고려하면 덜 매력적인 후보가 됩니다.</span>
+        </div>
+      </div>
+      <div class="table-wrap compact-table sim-table">
+        <table>
+          <thead><tr><th>기호</th><th>현재 그림의 값/역할</th><th>해석</th></tr></thead>
+          <tbody>
+            <tr><td>\\(A_i\\)</td><td>120 rides로 고정</td><td>그래프 비교를 쉽게 하기 위해 zone의 보정 잠재수요를 같은 값으로 둠</td></tr>
+            <tr><td>\\(x_i\\)</td><td>0대부터 80대까지 변화</td><td>04:00에 해당 zone에 배치하는 GBIKE PM 수</td></tr>
+            <tr><td>\\(C_i\\)</td><td>0, 10, 40, 100</td><td>ALPACA 경쟁 공급량이 커질수록 GBIKE capture curve가 아래로 내려감</td></tr>
+            <tr><td>\\(\\beta\\)</td><td>{fmt_float(BETA_CAPTURE, 2)}</td><td>배치량 증가가 수요 capture로 전환되는 속도</td></tr>
+            <tr><td>\\(\\theta\\)</td><td>{fmt_float(THETA_COMPETITION, 2)}</td><td>경쟁 공급량이 GBIKE capture를 약화시키는 강도</td></tr>
+            <tr><td>\\(U\\)</td><td>{fmt_float(U_MAX_RIDES, 1)} rides/device/day</td><td>PM 1대가 하루 처리할 수 있는 최대 ride 수</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="note"><strong>해석:</strong> 이 Section은 배치량을 한 대씩 늘릴 때 기대 ride가 왜 같은 폭으로 늘지 않는지 설명합니다. 따라서 모델은 “PM을 많이 두면 무조건 좋다”가 아니라, 각 zone에서 추가 1대가 만드는 수요 증가분이 비용보다 큰지를 비교하게 됩니다.</p>
+    """
+
+
+def simulation_summary(rows: pd.DataFrame) -> dict[str, Any]:
     active = rows[rows["x_star"] > 0]
     base_profit = float(active["profit_i_krw"].sum())
     profits: list[float] = []
@@ -356,6 +409,22 @@ def svg_simulation(rows: pd.DataFrame) -> str:
     p10 = values[max(0, int(len(values) * 0.10) - 1)]
     p50 = values[int(len(values) * 0.50)]
     p90 = values[min(len(values) - 1, int(len(values) * 0.90))]
+    return {
+        "base_profit": base_profit,
+        "values": values,
+        "p10": p10,
+        "p50": p50,
+        "p90": p90,
+        "scenario_count": len(values),
+    }
+
+
+def svg_simulation(summary: dict[str, Any]) -> str:
+    values = summary["values"]
+    p10 = float(summary["p10"])
+    p50 = float(summary["p50"])
+    p90 = float(summary["p90"])
+    base_profit = float(summary["base_profit"])
     min_v, max_v = min(values), max(values)
     span = max(max_v - min_v, 1.0)
     bins = 18
@@ -364,10 +433,10 @@ def svg_simulation(rows: pd.DataFrame) -> str:
         counts[min(bins - 1, int((value - min_v) / span * bins))] += 1
     max_count = max(max(counts), 1)
     width = 900
-    height = 300
+    height = 345
     left = 54
-    bottom = 250
-    plot_w = 780
+    bottom = 270
+    plot_w = 770
     plot_h = 190
     bar_gap = 4
     bar_w = (plot_w - bar_gap * (bins - 1)) / bins
@@ -377,8 +446,12 @@ def svg_simulation(rows: pd.DataFrame) -> str:
 
     parts = [
         f'<svg class="viz-svg" viewBox="0 0 {width} {height}" role="img" aria-label="simulation profit distribution">',
-        '<text x="0" y="24" class="svg-title">Simulation: demand/cost shock가 있을 때 Objective value 분포</text>',
+        '<text x="0" y="24" class="svg-title">Simulation: 수요와 비용이 흔들릴 때 Objective value 분포</text>',
+        '<text x="0" y="48" class="svg-label">x* 배치는 고정하고, 실제 하루의 demand shock와 cost shock만 바꾸어 120개 scenario를 다시 계산합니다.</text>',
         f'<line x1="{left}" y1="{bottom}" x2="{left + plot_w}" y2="{bottom}" stroke="#94a3b8"></line>',
+        f'<line x1="{left}" y1="{bottom}" x2="{left}" y2="{bottom - plot_h}" stroke="#94a3b8"></line>',
+        f'<text x="{left + plot_w - 170}" y="{bottom + 34}" class="svg-label">Objective value (KRW)</text>',
+        f'<text x="0" y="{bottom - plot_h + 12}" class="svg-label">scenario 수</text>',
     ]
     for idx, count in enumerate(counts):
         x = left + idx * (bar_w + bar_gap)
@@ -388,8 +461,60 @@ def svg_simulation(rows: pd.DataFrame) -> str:
         x = sx(value)
         parts.append(f'<line x1="{x:.1f}" y1="{bottom - plot_h}" x2="{x:.1f}" y2="{bottom}" stroke="{color}" stroke-width="2" stroke-dasharray="4 4"></line>')
         parts.append(f'<text x="{x + 5:.1f}" y="{bottom - plot_h + 18}" class="svg-label">{label}: {fmt_int(value)} KRW</text>')
+    base_x = sx(base_profit)
+    parts.append(f'<line x1="{base_x:.1f}" y1="{bottom - plot_h}" x2="{base_x:.1f}" y2="{bottom}" stroke="#172033" stroke-width="2"></line>')
+    parts.append(f'<text x="{base_x + 5:.1f}" y="{bottom - 8}" class="svg-value">baseline: {fmt_int(base_profit)} KRW</text>')
+    parts.append(f'<text x="{left}" y="{bottom + 18}" class="svg-label">{fmt_int(min_v)}</text>')
+    parts.append(f'<text x="{left + plot_w - 58}" y="{bottom + 18}" class="svg-label">{fmt_int(max_v)}</text>')
     parts.append("</svg>")
     return "\n".join(parts)
+
+
+def simulation_panel(rows: pd.DataFrame) -> str:
+    summary = simulation_summary(rows)
+    spread = float(summary["p90"]) - float(summary["p10"])
+    downside = float(summary["base_profit"]) - float(summary["p10"])
+    return f"""
+      <h2>Simulation: Objective value의 불확실성</h2>
+      <p>
+        Solver가 찾은 최적 배치 <code>x*</code>가 실제 운영일에도 항상 같은 profit을 낸다고 단정할 수는 없습니다.
+        이 그래프는 <code>x*</code>는 그대로 둔 채, 하루 수요와 재배치비가 예상보다 높거나 낮아지는 상황을 여러 번 만들어
+        Objective value가 어느 범위에서 흔들리는지 보여줍니다.
+      </p>
+      {svg_simulation(summary)}
+      <div class="simulation-grid">
+        <div class="sim-card">
+          <b>그래프를 읽는 법</b>
+          <span>각 막대는 특정 Objective value 구간에 들어온 scenario 개수입니다. 막대가 오른쪽에 많을수록 같은 배치 <code>x*</code>가 여러 불확실성 상황에서도 높은 profit을 낸다는 뜻입니다.</span>
+        </div>
+        <div class="sim-card">
+          <b>demand shock</b>
+          <span>실제 ride 수요가 예측보다 높거나 낮아지는 효과입니다. 수요가 커지면 운행매출과 ride당 변동비가 함께 증가하고, 수요가 작아지면 둘 다 줄어듭니다.</span>
+        </div>
+        <div class="sim-card">
+          <b>cost shock</b>
+          <span>재배치비가 평소보다 비싸지거나 싸지는 효과입니다. 예를 들어 회수 동선이 길어지거나 인력/차량 비용이 올라가면 같은 ride 수에서도 rebalancing cost가 커집니다.</span>
+        </div>
+        <div class="sim-card">
+          <b>P10 / P50 / P90</b>
+          <span><code>P10</code>은 나쁜 쪽 10% 경계, <code>P50</code>은 중앙값, <code>P90</code>은 좋은 쪽 10% 경계입니다. 따라서 <code>P10</code>은 downside risk, <code>P90-P10</code>은 profit 변동폭으로 해석할 수 있습니다.</span>
+        </div>
+      </div>
+      <div class="table-wrap compact-table sim-table">
+        <table>
+          <thead><tr><th>항목</th><th>값</th><th>해석</th></tr></thead>
+          <tbody>
+            <tr><td>Scenario 수</td><td>{fmt_int(summary["scenario_count"])}</td><td>서로 다른 demand/cost 조합을 120번 계산</td></tr>
+            <tr><td>Baseline objective</td><td>{fmt_int(summary["base_profit"])} KRW</td><td>shock를 주지 않은 기존 최적화 결과의 profit</td></tr>
+            <tr><td>P10 objective</td><td>{fmt_int(summary["p10"])} KRW</td><td>나쁜 쪽 10% scenario에서 기대할 수 있는 하방 profit 기준</td></tr>
+            <tr><td>P50 objective</td><td>{fmt_int(summary["p50"])} KRW</td><td>shock scenario들의 중앙값</td></tr>
+            <tr><td>P90 objective</td><td>{fmt_int(summary["p90"])} KRW</td><td>좋은 쪽 10% scenario에서의 상방 profit 기준</td></tr>
+            <tr><td>P90 - P10</td><td>{fmt_int(spread)} KRW</td><td>같은 배치안의 objective 변동폭</td></tr>
+            <tr><td>Baseline - P10</td><td>{fmt_int(downside)} KRW</td><td>기준 예측 대비 하방으로 밀릴 수 있는 폭</td></tr>
+          </tbody>
+        </table>
+      </div>
+    """
 
 
 def decision_variable_table() -> str:
@@ -589,6 +714,11 @@ def render_html(rows: pd.DataFrame, meta: dict[str, Any], solution: dict[str, An
     .term-grid {{ display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-top: 12px; }}
     .term {{ border-left: 3px solid var(--green); padding: 7px 9px; background: #f8fafc; font-size: 13px; line-height: 1.45; }}
     .term code {{ font-weight: 800; }}
+    .simulation-grid {{ display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin-top: 12px; }}
+    .sim-card {{ border: 1px solid var(--line); border-radius: 8px; padding: 11px 12px; background: #f8fafc; }}
+    .sim-card b {{ display: block; margin-bottom: 5px; color: var(--ink); }}
+    .sim-card span {{ display: block; color: var(--muted); font-size: 13px; line-height: 1.55; }}
+    .sim-table {{ margin-top: 12px; max-height: none; }}
     table {{ width: 100%; border-collapse: collapse; font-size: 13px; }}
     th, td {{ border-bottom: 1px solid var(--line); padding: 9px 8px; text-align: right; vertical-align: top; }}
     th:first-child, td:first-child {{ text-align: left; }}
@@ -603,7 +733,7 @@ def render_html(rows: pd.DataFrame, meta: dict[str, Any], solution: dict[str, An
     .svg-value {{ font: 700 12px system-ui, sans-serif; fill: #172033; }}
     iframe {{ width: 100%; height: 620px; border: 1px solid var(--line); border-radius: 8px; background: #fff; }}
     .note {{ color: var(--muted); font-size: 13px; margin-top: 8px; }}
-    @media (max-width: 920px) {{ .hero, .two, .three {{ grid-template-columns: 1fr; }} .navlink {{ justify-self: start; }} iframe {{ height: 500px; }} }}
+    @media (max-width: 920px) {{ .hero, .two, .three, .simulation-grid {{ grid-template-columns: 1fr; }} .navlink {{ justify-self: start; }} iframe {{ height: 500px; }} }}
   </style>
 </head>
 <body>
@@ -611,7 +741,6 @@ def render_html(rows: pd.DataFrame, meta: dict[str, Any], solution: dict[str, An
     <div class="hero">
       <div>
         <h1>Sejong GBIKE 04:00 Deployment Optimization</h1>
-        <p>이 페이지는 Sejong TAGO PM 데이터를 이용해 Solver에 넣을 수 있는 Optimization Model을 보여줍니다. 핵심은 decision variable <code>xᵢ</code>, objective function, constraints, 그리고 최종 배치 결과 <code>x*</code>입니다.</p>
       </div>
       <a class="navlink" href="./index.html">Visualization index</a>
     </div>
@@ -697,8 +826,8 @@ def render_html(rows: pd.DataFrame, meta: dict[str, Any], solution: dict[str, An
     </section>
 
     <section class="grid two" style="margin-top:16px;">
-      <div class="card">{svg_capture_curve_korean()}</div>
-      <div class="card">{svg_simulation(rows)}</div>
+      <div class="card">{capture_curve_panel()}</div>
+      <div class="card">{simulation_panel(rows)}</div>
     </section>
 
     <section class="card" style="margin-top:16px;">
