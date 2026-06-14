@@ -13,6 +13,7 @@ import numpy as np
 import pandas as pd
 
 import data_input
+import visualize_optimization_model
 import visualize_sejong_tago
 from common import append_jsonl, ensure_dir, now_kst_iso, now_kst_label, write_json
 
@@ -354,6 +355,11 @@ def run(args: argparse.Namespace) -> int:
             "map": visualization["map"],
             "manifest": str(Path(args.visualization_dir) / "sejong_visualization_manifest.json"),
         }
+        optimization_visualization = visualize_optimization_model.render(
+            Path(args.processed_dir),
+            Path(args.visualization_dir),
+        )
+        summary["optimization_visualization"] = optimization_visualization["outputs"]
     append_jsonl(Path(args.processed_dir) / "collector_runs.jsonl", summary)
     print(json.dumps(summary, ensure_ascii=False, sort_keys=True))
     return 0 if summary.get("ok") else 1

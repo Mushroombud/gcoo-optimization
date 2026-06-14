@@ -202,8 +202,11 @@ write_visualization_index() {
     <h1>Sejong TAGO PM Visualization</h1>
     <p>수집 cron이 갱신하는 최신 세종 PM 스냅샷 기반 정적 리포트입니다.</p>
     <nav>
+      <a href="./optimization_model.html">Optimization Model 보기<span>Sejong 500m grid 기반 04:00 최적 배치 모델, 제약조건, 결과 시각화</span></a>
+      <a href="./optimization_model_map.html">Optimization 지도 보기<span>Zone별 최적 배치량 x*, 기대 ride, zone별 profit 지도</span></a>
       <a href="./sejong_map.html">지도 보기<span>최신 PM 위치, 열지도, 500m 격자 집계</span></a>
       <a href="./sejong_charts_dashboard.html">차트 대시보드 보기<span>공급자별 공급량, 시간 추세, 배터리 분포</span></a>
+      <a href="./optimization_model_data.json">Optimization JSON<span>최종 배치 결과, 모델 파라미터, 산출물 경로</span></a>
       <a href="./sejong_visualization_manifest.json">Manifest JSON<span>생성 시각과 입력 데이터 행 수</span></a>
     </nav>
   </main>
@@ -323,11 +326,13 @@ if (( STATIC_SERVING == 1 )); then
   fi
   STATIC_URL_LINES=$(cat <<EOF_STATIC
 Local static index: ${STATIC_BASE_URL}/
+Local optimization model: ${STATIC_BASE_URL}/optimization_model.html
+Local optimization map: ${STATIC_BASE_URL}/optimization_model_map.html
 Local static map: ${STATIC_BASE_URL}/sejong_map.html
 Local static dashboard: ${STATIC_BASE_URL}/sejong_charts_dashboard.html
 EOF_STATIC
 )
-  STATIC_CURL_LINE="  curl -I ${STATIC_BASE_URL}/sejong_map.html"
+  STATIC_CURL_LINE="  curl -I ${STATIC_BASE_URL}/optimization_model.html"
   if (( CLOUDFLARE_TUNNEL == 1 )) && [[ -z "${CLOUDFLARE_TUNNEL_TOKEN}" ]]; then
     STATIC_CURL_LINE="${STATIC_CURL_LINE}
   grep -Eo 'https://[^ ]+\.trycloudflare\.com' ${CLOUDFLARED_LOG_FILE} | tail -1"

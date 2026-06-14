@@ -1,201 +1,228 @@
-# Personal Mobility 배치 최적화 문제
+# Sejong GBIKE 04:00 Deployment Optimization
 
-이 레포지토리는 경영과학에서의 PM 배치 최적화 프로젝트를 위한 코드베이스입니다.
+이 레포지토리는 세종특별시 TAGO Personal Mobility 데이터를 이용해 **GBIKE/GCOO의 매일 04:00 PM 최적 배치 문제**를 모델링하고 시각화하는 프로젝트입니다.
 
-## 현재 API 확인 결과
-
-### 서울 공공자전거 / 서울 열린데이터광장
-
-서울 열린데이터광장 API 키로 접근 가능합니다.
+핵심 질문은 단순합니다.
 
 ```text
-http://openapi.seoul.go.kr:8088/sample/json/bikeList/1/5/
+세종시의 각 500m grid zone에 GBIKE PM을 몇 대 배치해야
+하루 기대 profit이 최대가 되는가?
 ```
 
-관측된 응답 형태:
+이 프로젝트는 특정 solver algorithm보다 **Solver에 넣을 Optimization Model** 자체를 설득력 있게 정의하는 데 초점을 둡니다. 즉, decision variable, objective function, constraints, non-linear demand capture, competition effect, rebalancing cost, simulation-based robustness를 데이터와 연결해 설명합니다.
 
-```json
-{
-  "rentBikeStatus": {
-    "list_total_count": 5,
-    "RESULT": { "CODE": "INFO-000", "MESSAGE": "정상 처리되었습니다." },
-    "row": [
-      {
-        "rackTotCnt": "15",
-        "stationName": "102. 망원역 1번출구 앞",
-        "parkingBikeTotCnt": "16",
-        "shared": "107",
-        "stationLatitude": "37.55564880",
-        "stationLongitude": "126.91062927",
-        "stationId": "ST-4"
-      }
-    ]
-  }
-}
-```
+주요 산출물은 다음입니다.
 
-이 API는 서울 공공자전거 대여소 ID, 이름, 위도, 경도를 제공할 수 있습니다. `data/raw/seoul_bike_stations.csv` 생성에 유용합니다.
+| Output | 설명 |
+| --- | --- |
+| `Data_Model_Sheet.md` | 데이터 구조와 optimization model을 설명하는 Model Sheet |
+| `outputs/visualizations/optimization_model.html` | 모델 식, 변수, 제약조건, 결과, simulation을 보여주는 HTML dashboard |
+| `outputs/visualizations/optimization_model_map.html` | zone별 최적 배치량 `x*` 지도 |
+| `outputs/visualizations/optimization_model_data.json` | 최적화 결과와 산출물 경로 JSON |
+| `outputs/visualizations/sejong_map.html` | 최신 PM 위치와 ride/OD 기반 지도 |
+| `outputs/visualizations/sejong_charts_dashboard.html` | 수집량, 공급자별 현황, battery/activity chart |
 
-하지만 이동 이력은 제공하지 않습니다. 명세에는 대여 시각, 반납 시각, 출발 대여소, 도착 대여소, 거리, 이용 시간이 필요합니다. 이 데이터는 서울 공공자전거 대여 이력 파일 데이터나 다른 과거 이동 이력 소스에서 확보해야 합니다.
+---
 
-### TAGO / data.go.kr
+## Project Status
 
-동봉된 Word 가이드 `오픈API활용가이드_국토교통부(TAGO)_퍼스널모빌리티정보v1.1.docx`에는 실제 PM API가 다음과 같이 문서화되어 있습니다.
+현재 프로젝트는 서울 PM API가 아닌 **Sejong TAGO PM snapshot**을 중심으로 동작합니다.
+
+서울 TAGO 엔드포인트는 호출 자체는 가능하지만 서울 PM 공급자 행을 안정적으로 노출하지 않았고, 반대로 세종은 `GBIKE`, `ALPACA` 장치 위치 스냅샷을 반복 수집할 수 있었습니다. 따라서 모델과 시각화는 세종 500m grid zone을 기준으로 구성되어 있습니다.
+
+현재 데이터 파이프라인은 다음을 생성합니다.
 
 ```text
-Service: http://apis.data.go.kr/1613000/PersonalMobilityInfo
-Provider list: /GetPMProvider
-PM list: /GetPMListByProvider
+TAGO API snapshot
+-> raw PM CSV/JSON
+-> 500m grid zone mapping
+-> latest supply by operator and zone
+-> device interval movement
+-> inferred ride segment
+-> OD flow
+-> optimization model input
+-> non-linear deployment dashboard
 ```
 
-가이드와 실제 호출에서 확인한 응답 필드:
+---
 
-```text
-providerName, vehicleID, battery, cityCode, cityName, latitude, longitude
+## Optimization Model
+
+## 1. Decision Variable
+
+Solver가 직접 고르는 값은 각 zone의 GBIKE 배치량입니다.
+
+```math
+x_i = \text{04:00에 zone } i \text{에 배치할 GBIKE PM 수}
 ```
 
-구현된 흐름:
+정수 모델에서는:
 
-```text
-GetPMProvider with cityName omitted -> all providerName/cityCode pairs
-Filter provider rows where cityName matches target_city_name=서울
-GetPMListByProvider(providerName, cityCode) -> live rideable PM devices
+```math
+x_i \in \mathbb{Z}_+
 ```
 
-현재 실제 동작: 가이드에 따르면 전체 도시 조회를 위해 `cityName`을 생략해야 하지만, API는 현재 `세종특별시` 공급자(`ALPACA`, `GBIKE`)만 반환합니다. 데이터 입력 코드는 전체 공급자 CSV와 대상 도시 공급자 CSV를 모두 쓰고, `cityName`이 서울과 일치하는 공급자에 대해서만 PM 목록 엔드포인트를 호출합니다. 최신 실행 기준으로 TAGO API 자체는 동작하지만, 이 엔드포인트는 서울 PM 공급자 행을 노출하지 않습니다.
+수업의 Non-linear Optimization 설명이나 Excel Solver 근사에서는:
 
-## `Spec.md` 기준 데이터 확보 가능성
+```math
+x_i \ge 0
+```
 
-| 필요 입력 | API 확보 가능성 | 현재 상태 |
+로 완화할 수 있습니다.
+
+---
+
+## 2. Objective Function
+
+목표는 하루 기대 profit을 최대화하는 것입니다.
+
+```math
+\max_x \sum_i \left[(p_i-v)Q_i(x_i)-c_i x_i-r_i(x_i)\right]
+```
+
+각 항은 다음 의미를 갖습니다.
+
+| Term | 의미 |
+| --- | --- |
+| `(p_i-v)Q_i(x_i)` | zone `i`에서 발생하는 기대 운행이익 |
+| `p_i` | ride 1건당 평균 매출 |
+| `v` | ride 1건당 변동비 |
+| `Q_i(x_i)` | 배치량 `x_i`에서 실제로 잡을 수 있는 기대 ride 수 |
+| `c_i x_i` | PM을 배치해두는 데 드는 일 운영비 |
+| `r_i(x_i)` | 이용 후 흩어진 PM을 회수/재배치하는 기대 비용 |
+
+이 구조는 “ride revenue - operating cost - rebalancing cost”를 직접 모델링합니다.
+
+---
+
+## 3. Non-linear Demand Capture
+
+GBIKE가 zone `i`에서 capture하는 기대 ride 수는 다음처럼 둡니다.
+
+```math
+Q_i(x_i)
+= \min \left\{
+A_i\left(1-e^{-\frac{\beta x_i}{1+\theta C_i}}\right),
+Ux_i
+\right\}
+```
+
+이 식을 쓰는 이유는 다음입니다.
+
+- PM을 더 많이 배치하면 사용자가 가까운 기기를 찾을 확률이 올라갑니다.
+- 하지만 이미 충분히 많은 PM이 있는 zone에서는 추가 1대의 효과가 작아집니다.
+- ALPACA 공급량 `C_i`가 많을수록 같은 GBIKE 배치량의 demand capture 효과가 약해집니다.
+- PM 1대가 하루에 처리할 수 있는 ride 수는 `U`로 제한됩니다.
+
+즉, 모델은 “PM을 많이 놓으면 항상 같은 폭으로 수요가 늘어난다”는 linear assumption을 피합니다.
+
+---
+
+## 4. Adjusted Demand Potential
+
+기본 수요는 inferred ride origin count에서 출발합니다.
+
+```math
+D_i = \text{inferred rides starting from zone } i
+```
+
+경쟁사 ALPACA 공급량은 두 가지 의미를 가집니다.
+
+| 역할 | 의미 |
+| --- | --- |
+| Market validation | ALPACA가 많은 곳은 PM 시장이 존재한다는 신호일 수 있음 |
+| Competition pressure | ALPACA가 많으면 GBIKE가 같은 수요를 잡기 어려움 |
+
+따라서 보정 잠재수요는 다음처럼 둡니다.
+
+```math
+A_i
+=D_i\left(
+1+\lambda
+\frac{\log(1+C_i)}{\log(1+C_{\max})}
+\right)
+```
+
+`log(1+C_i)`는 경쟁사 존재 신호도 체감한다고 보는 가정입니다. 0대에서 10대로 늘어나는 것은 강한 시장 신호지만, 100대에서 110대로 늘어나는 것은 추가 정보가 작기 때문입니다.
+
+---
+
+## 5. Constraints
+
+현재 dashboard run에서 쓰는 핵심 제약조건은 다음입니다.
+
+| Constraint | 식 | 의미 |
 | --- | --- | --- |
-| 서울 행정동 경계 | 별도 경계 데이터셋으로 가능, TAGO/bikeList는 아님 | `data/raw/seoul_admin_dong.geojson` 또는 확인된 경계 API 필요 |
-| 서울 공공자전거 대여소 좌표 | API로 해결 가능 | 서울 `bikeList`로 확인됨 |
-| 서울 공공자전거 대여 이력 | `bikeList`로는 해결 불가 | 과거 이동 이력 CSV 또는 파일 API 필요 |
-| TAGO 공유 PM 장치 스냅샷 | 도시 데이터가 노출되는 경우 API로 해결 가능 | `PersonalMobilityInfo`는 동작하지만 전체 도시 공급자 조회가 현재 세종만 노출하고 서울은 노출하지 않음 |
-| GCOO 가격/비용 | 공공 API 데이터 아님 | 설정값 가정 |
+| Fleet | `Σ_i x_i = F` | 이번 run에서는 500대를 반드시 배치 |
+| Capacity | `0 <= x_i <= K_i` | 각 500m zone의 물리적/운영적 수용량 |
+| Demand capture | `Q_i <= A_i(1-exp(-βx_i/(1+θC_i)))` | 배치량 증가의 체감효과와 경쟁 압력 |
+| Device throughput | `Q_i <= Ux_i` | PM 1대가 하루 처리 가능한 최대 ride 수 |
+| Non-negativity | `x_i, Q_i, r_i(x_i) >= 0` | 음수 배치와 음수 수요 방지 |
 
-## 필요한 키
+정수 제약 `x_i ∈ Z_+`까지 넣으면 문제는 MINLP가 됩니다. 연속 완화로 설명하면 수업의 Non-linear Optimization 범위에 더 직접적으로 연결됩니다.
 
-`.env`는 다음 키를 지원합니다.
+---
+
+## 6. Simulation
+
+Optimization은 특정 parameter와 demand assumption 아래에서 `x*`를 찾습니다. 실제 운영일에는 수요와 비용이 흔들릴 수 있으므로, dashboard는 `x*`를 고정한 뒤 demand/cost shock scenario를 만들어 Objective value 분포를 보여줍니다.
+
+```text
+1. 최적 배치 x*를 고정한다.
+2. demand shock와 cost shock를 만든다.
+3. 각 scenario에서 Objective value를 다시 계산한다.
+4. P10, P50, P90, downside risk를 해석한다.
+```
+
+Simulation은 solver를 대체하는 algorithm이 아니라, 선택된 배치안의 robustness를 검증하는 단계입니다.
+
+---
+
+## Current Baseline Parameters
+
+현재 optimization visualization에서 사용하는 static parameter는 다음과 같습니다.
+
+| Parameter | 값 | 의미 |
+| --- | ---: | --- |
+| `F` | 500 | 이번 run에서 배치할 전체 GBIKE PM 수 |
+| `λ` | 0.30 | 경쟁사 존재를 market validation으로 반영하는 강도 |
+| `β` | 0.08 | GBIKE 배치량이 demand capture로 전환되는 속도 |
+| `θ` | 1.00 | ALPACA 공급량이 GBIKE capture를 약화시키는 정도 |
+| `U` | 6.0 rides/device/day | PM 1대가 하루 처리할 수 있는 최대 ride 수 |
+| `p_i` | 2,200 KRW | ride 1건 평균 매출 |
+| `v` | 300 KRW | ride 1건당 변동비 |
+| `c_i` | 2,500 KRW/day | PM 1대당 일 운영비 |
+| `ρ` | 900 KRW/km | 재배치 거리 1km당 비용 |
+| `κ` | 1.25 | zone capacity `K_i` 계산 multiplier |
+
+이 값들은 baseline assumption입니다. 보고서에서는 sensitivity analysis 대상으로 둘 수 있습니다.
+
+---
+
+## Data Pipeline
+
+## Raw Inputs
+
+TAGO Personal Mobility API에서 세종 PM provider와 PM list를 수집합니다.
+
+```text
+GetPMProvider
+GetPMListByProvider(providerName, cityCode)
+```
+
+필요한 환경 변수:
 
 ```bash
-SEOUL_API_KEY="..."
 OPEN_DATA_PORTAL_API_KEY="..."
 ```
 
-기존 별칭도 계속 허용됩니다.
+기존 alias도 지원합니다.
 
 ```bash
-SEOUL_OPEN_API_KEY="..."
 DATA_GO_KR_SERVICE_KEY="..."
 ```
 
-`OPEN_DATA_PORTAL_API_KEY`는 TAGO `PersonalMobilityInfo` 호출 시 자동으로 `serviceKey`로 주입됩니다.
-
-## 데이터 입력 파트
-
-데이터 입력 계층은 원시 입력 수집과 정규화만 수행합니다. 최적화 모델은 실행하지 않습니다.
-
-```bash
-python3 src/data_input.py --snapshot-label now
-```
-
-이 명령은 다음 파일을 씁니다.
-
-```text
-data/raw/seoul_bike_stations.csv
-data/raw/seoul_private_pm_operator_summary.csv
-data/raw/api/tago_pm/providers_all_<label>.csv
-data/raw/api/tago_pm/providers_<label>.csv
-data/raw/tago_pm_snapshots_<label>.csv    # TAGO가 target_city_name과 일치하는 공급자를 반환할 때만 생성
-data/raw/api/
-data/raw/snapshot_manifest.jsonl
-```
-
-다음 1주일 동안 목표 의사결정 시간대에 가깝게, 이상적으로는 03:30-04:30 사이에 같은 명령을 반복 실행합니다.
-
-```bash
-python3 src/data_input.py --snapshot-label "$(date +%Y%m%dT%H%M%S)"
-```
-
-도시 검증을 통과한 TAGO 호출이 성공할 때마다 정규화된 PM 스냅샷 파일이 하나씩 추가됩니다. 파일이 누적될수록 모델은 다음 항목을 더 잘 추정할 수 있습니다.
-
-- `x_obs_i`: 평균 관측 GCOO 배치
-- `competitor_count_is`: 시나리오 날짜별 경쟁사 밀도
-- `K_i`: 관측 PM 공급량 백분위 기반 용량
-- 날짜별 시나리오 변동
-
-## 모델 파트
-
-모델 계층은 외부 API를 호출하지 않습니다. `data/raw`에 누적된 파일을 읽고 처리된 모델 산출물을 만듭니다.
-
-```bash
-python3 src/model.py --out outputs/model
-```
-
-실제 서울 매칭 TAGO PM 스냅샷 파일이 아직 없으면, 모델은 데이터가 있는 척하지 않고 준비 상태 보고서를 씁니다.
-
-```text
-outputs/model/model_readiness.json
-```
-
-스모크 테스트 전용으로는 다음을 사용합니다.
-
-```bash
-python3 src/model.py --out outputs/model_fixture --allow-fixtures
-```
-
-수집과 모델 실행을 한 번에 수행하는 명령:
-
-```bash
-python3 src/run_pipeline.py --snapshot-label now --out outputs/latest_run
-```
-
-## 세종 TAGO Cron 수집기
-
-서울 TAGO 엔드포인트는 현재 서울 PM 공급자를 노출하지 않습니다. 세종 전환 작업에는 전용 cron 수집기를 사용합니다.
-
-```bash
-scripts/setup_sejong_tago_cron.sh --interval-minutes 5
-```
-
-기본 실행은 `outputs/visualizations`를 로컬 Python HTTP 서버로 서빙하고 Cloudflare Tunnel로 외부에 노출합니다. 기본 로컬 origin은 `127.0.0.1:8080`입니다.
-
-```bash
-# Cloudflare Dashboard에서 만든 named tunnel token 사용
-CLOUDFLARE_TUNNEL_TOKEN="..." scripts/setup_sejong_tago_cron.sh --interval-minutes 5 --static-port 8080
-
-# 토큰 없이 임시 trycloudflare.com quick tunnel 사용
-scripts/setup_sejong_tago_cron.sh --interval-minutes 5 --static-port 8080
-
-# 정적 페이지 서빙 없이 수집 cron만 등록
-scripts/setup_sejong_tago_cron.sh --interval-minutes 5 --no-static-serving
-```
-
-서버 사전 조건:
-
-```bash
-OPEN_DATA_PORTAL_API_KEY="..."
-```
-
-위 값은 `.env` 또는 `--env-file`로 전달한 파일에 있어야 합니다. static serving을 켜는 기본 실행은 `cloudflared` 바이너리가 필요합니다. Docker 컨테이너에서는 nginx나 systemctl을 사용하지 않고, 스크립트가 `python -m http.server`와 `cloudflared tunnel` 프로세스를 백그라운드로 띄웁니다. named tunnel을 쓰는 경우 Cloudflare Public Hostname의 origin service를 `http://127.0.0.1:8080`처럼 `--static-port`와 맞춰 설정하세요.
-
-설정 스크립트가 수행하는 작업:
-
-1. `.venv` 생성
-2. `requirements.txt` 설치
-3. 세종 TAGO 수집 1회 즉시 실행
-4. rolling 전처리 CSV 및 standalone visualization HTML 생성
-5. 현재 Unix 사용자에 대해 idempotent한 crontab 항목 등록
-6. `outputs/visualizations` 로컬 static server 및 Cloudflare Tunnel 시작
-
-Cron이 호출하는 명령:
-
-```bash
-python src/collect_sejong_tago.py --processed-dir data/processed/sejong_tago --visualization-dir outputs/visualizations
-```
-
-원시 및 정규화 스냅샷 파일은 다음 위치에 기록됩니다.
+원시 데이터는 다음 위치에 저장됩니다.
 
 ```text
 data/raw/api/tago_pm/
@@ -203,7 +230,11 @@ data/raw/tago_pm_snapshots_sejong_*.csv
 data/raw/snapshot_manifest.jsonl
 ```
 
-각 스냅샷 이후 rolling 전처리 산출물이 다시 생성됩니다.
+---
+
+## Processed Outputs
+
+수집 후 rolling 전처리 산출물이 다시 생성됩니다.
 
 ```text
 data/processed/sejong_tago/sejong_pm_snapshots_accumulated.csv
@@ -212,515 +243,352 @@ data/processed/sejong_tago/sejong_pm_operator_snapshot_counts.csv
 data/processed/sejong_tago/sejong_pm_zone_snapshot_counts.csv
 data/processed/sejong_tago/sejong_pm_device_intervals.csv
 data/processed/sejong_tago/sejong_pm_activity_by_zone.csv
+data/processed/sejong_tago/sejong_pm_inferred_rides.csv
+data/processed/sejong_tago/sejong_pm_od_flows.csv
 data/processed/sejong_tago/sejong_pm_preprocess_summary.json
+data/processed/sejong_tago/collector_runs.jsonl
 ```
 
-각 스냅샷 이후 visualization도 다시 생성됩니다.
+각 테이블의 역할은 다음입니다.
+
+| Table | 역할 |
+| --- | --- |
+| `sejong_pm_latest_snapshot.csv` | 최신 PM 위치와 operator supply |
+| `sejong_pm_zone_snapshot_counts.csv` | 시점별 zone/operator 공급량 |
+| `sejong_pm_device_intervals.csv` | 같은 device의 연속 snapshot 간 이동 |
+| `sejong_pm_inferred_rides.csv` | 4-6분, 100m 이상 이동 interval로 추정한 ride segment |
+| `sejong_pm_od_flows.csv` | inferred ride의 origin-destination flow |
+
+---
+
+## Visualization Outputs
+
+전처리 후 다음 HTML/JSON이 생성됩니다.
 
 ```text
-outputs/visualizations/sejong_charts_dashboard.html
+outputs/visualizations/index.html
+outputs/visualizations/optimization_model.html
+outputs/visualizations/optimization_model_map.html
+outputs/visualizations/optimization_model_data.json
 outputs/visualizations/sejong_map.html
+outputs/visualizations/sejong_charts_dashboard.html
 outputs/visualizations/sejong_visualization_manifest.json
 ```
 
-static serving을 켠 경우 컨테이너 내부 로컬 origin과 Cloudflare Tunnel URL로 확인할 수 있습니다. quick tunnel URL은 `logs/sejong_tago_cloudflared.log`에 기록됩니다.
+`optimization_model.html`에는 다음이 포함됩니다.
+
+- Solver에 넣는 model 식
+- decision variables와 constraints
+- static parameters와 data-derived parameters
+- 최종 배치 결과 `x*`
+- zone별 배치 지도
+- non-linear demand capture 해설
+- demand/cost shock simulation 해설
+
+---
+
+## Technical Stack
+
+이 프로젝트는 Python 기반 데이터 파이프라인과 static HTML visualization으로 구성됩니다.
+
+| Layer | Stack | 역할 |
+| --- | --- | --- |
+| Data collection | `requests`, TAGO API | PM provider/device snapshot 수집 |
+| Data processing | `pandas`, `numpy` | snapshot 정규화, grid mapping, interval/OD 계산 |
+| Config | `PyYAML`, `.env` | API key와 model parameter 관리 |
+| Optimization prototype | Python functions | non-linear demand/profit 계산과 배치 결과 생성 |
+| Charts | `pyecharts` | 시간 추세, operator 현황 chart |
+| Maps | `folium`, `branca`, Leaflet | PM 위치, OD flow, optimization result 지도 |
+| Static serving | `python -m http.server` | `outputs/visualizations` 로컬 서빙 |
+| Public tunnel | `cloudflared` optional | 외부 공유용 tunnel |
+| Scheduling | `cron` | 5분 주기 수집/전처리/시각화 refresh |
+
+React/Vite 같은 frontend build system은 사용하지 않습니다. 산출물은 정적 HTML이므로 서버 부하가 작고, cron이 파일을 재생성하면 브라우저에서 새로고침해 최신 결과를 볼 수 있습니다.
+
+---
+
+## Architecture
+
+```text
+config/model_config.yaml
+        |
+        v
+src/collect_sejong_tago.py
+        |
+        +-- TAGO API fetch
+        +-- raw snapshot write
+        +-- 500m grid zone mapping
+        +-- processed CSV generation
+        +-- inferred ride / OD flow generation
+        |
+        +--> src/visualize_sejong_tago.py
+        |       +-- sejong_map.html
+        |       +-- sejong_charts_dashboard.html
+        |
+        +--> src/visualize_optimization_model.py
+                +-- build zone model
+                +-- compute non-linear demand capture
+                +-- compute deployment result x*
+                +-- optimization_model.html
+                +-- optimization_model_map.html
+                +-- optimization_model_data.json
+```
+
+현재 `collect_sejong_tago.py`가 cron entry point입니다. 이 파일이 한 번 실행될 때마다 일반 Sejong visualization과 optimization visualization이 모두 갱신됩니다.
+
+---
+
+## Solver/Internal Implementation Notes
+
+현재 dashboard는 full-blown external MINLP solver를 직접 호출하지 않습니다. 대신 모델 구조를 명확히 보여주기 위한 lightweight optimization routine을 Python으로 구현합니다.
+
+구현 위치:
+
+```text
+src/visualize_optimization_model.py
+```
+
+주요 함수:
+
+| Function | 역할 |
+| --- | --- |
+| `build_zone_model()` | processed CSV에서 zone별 `D_i`, `C_i`, `A_i`, `K_i`, rebalancing proxy 생성 |
+| `demand_capture()` | `Q_i(x_i)` 비선형 수요함수 계산 |
+| `zone_profit()` | zone별 profit contribution 계산 |
+| `optimize_dashboard_solution()` | fleet `F`를 zone별 `x*`로 배치 |
+| `render_html()` | model sheet dashboard HTML 생성 |
+| `render_model_map()` | folium 기반 최적 배치 지도 생성 |
+
+현재 `optimize_dashboard_solution()`은 각 zone에 `k`대를 둘 때의 incremental profit을 계산해 fleet 제약 안에서 배치 결과를 만듭니다. 수업 보고서에서는 이 부분을 solver algorithm으로 강조하기보다, 위에서 정의한 non-linear model을 Gurobi/Excel Solver에 넣을 수 있는 형태로 설명하는 것이 중요합니다.
+
+외부 solver로 확장하려면 다음 방식이 가능합니다.
+
+| Approach | 설명 |
+| --- | --- |
+| Continuous NLP | `x_i >= 0`으로 완화하고 SciPy/Gurobi nonlinear constraint로 풀이 |
+| MINLP | `x_i ∈ Z_+`와 비선형 수요식을 함께 두고 MINLP solver 사용 |
+| Piecewise Linear Approximation | `Q_i(x_i)`를 구간별 선형화해 MILP로 변환 |
+| Scenario Optimization | `Q_is(x_i)`와 `π_s`를 두어 expected profit 또는 downside objective 최적화 |
+
+---
+
+## Setup
+
+Python 3.11+ 환경을 권장합니다.
+
+```bash
+python3 -m venv .venv
+. .venv/bin/activate
+python -m pip install -U pip
+python -m pip install -r requirements.txt
+```
+
+`.env`에 API key를 넣습니다.
+
+```bash
+OPEN_DATA_PORTAL_API_KEY="..."
+```
+
+---
+
+## Run Once
+
+수집 없이 기존 raw data로 processed outputs와 visualizations만 재생성하려면:
+
+```bash
+.venv/bin/python src/collect_sejong_tago.py \
+  --skip-fetch \
+  --processed-dir data/processed/sejong_tago \
+  --visualization-dir outputs/visualizations
+```
+
+TAGO API에서 새 snapshot을 수집하고 전체 pipeline을 실행하려면:
+
+```bash
+.venv/bin/python src/collect_sejong_tago.py \
+  --config config/model_config.yaml \
+  --env .env \
+  --processed-dir data/processed/sejong_tago \
+  --visualization-dir outputs/visualizations
+```
+
+Optimization visualization만 단독 재생성하려면:
+
+```bash
+.venv/bin/python src/visualize_optimization_model.py
+```
+
+---
+
+## 5-minute Refresh
+
+5분 주기 수집과 visualization refresh는 다음 스크립트로 설정합니다.
+
+```bash
+scripts/setup_sejong_tago_cron.sh --interval-minutes 5
+```
+
+이 스크립트가 수행하는 일:
+
+1. `.venv` 생성 및 의존성 설치
+2. 초기 Sejong TAGO collection 실행
+3. processed CSV 재생성
+4. Sejong map/chart HTML 생성
+5. optimization model HTML/map/JSON 생성
+6. 현재 Unix 사용자 crontab에 5분 주기 job 등록
+7. optional static HTTP server와 Cloudflare Tunnel 실행
+
+cron이 호출하는 명령은 다음 구조입니다.
+
+```bash
+python src/collect_sejong_tago.py \
+  --config config/model_config.yaml \
+  --env .env \
+  --processed-dir data/processed/sejong_tago \
+  --visualization-dir outputs/visualizations
+```
+
+`collect_sejong_tago.py` 안에서 일반 visualization과 optimization visualization이 함께 refresh됩니다.
+
+---
+
+## Static Serving
+
+기본 setup script는 `outputs/visualizations`를 local static server로 서빙합니다.
 
 ```text
 http://127.0.0.1:8080/
+http://127.0.0.1:8080/optimization_model.html
+http://127.0.0.1:8080/optimization_model_map.html
 http://127.0.0.1:8080/sejong_map.html
-https://<quick-tunnel>.trycloudflare.com/sejong_map.html
 http://127.0.0.1:8080/sejong_charts_dashboard.html
 ```
 
-cron 작업과 로그 확인:
+Cloudflare Tunnel을 사용하려면:
+
+```bash
+CLOUDFLARE_TUNNEL_TOKEN="..." scripts/setup_sejong_tago_cron.sh \
+  --interval-minutes 5 \
+  --static-port 8080
+```
+
+토큰 없이 quick tunnel을 쓸 수도 있습니다.
+
+```bash
+scripts/setup_sejong_tago_cron.sh --interval-minutes 5 --static-port 8080
+```
+
+정적 페이지 서빙 없이 cron만 등록하려면:
+
+```bash
+scripts/setup_sejong_tago_cron.sh --interval-minutes 5 --no-static-serving
+```
+
+---
+
+## Monitoring
+
+cron 등록 확인:
 
 ```bash
 crontab -l | grep gcoo-sejong-tago-cron
+```
+
+수집/전처리/시각화 로그 확인:
+
+```bash
 tail -f logs/sejong_tago_cron.log
-curl -I http://<server-ip-or-domain>:8080/sejong_map.html
 ```
 
-## Pivot 검토: 세종 TAGO 기반 또는 서울 따릉이 기반
+최근 collector summary 확인:
 
-현재 확인된 제약은 명확합니다. 서울 TAGO PM 엔드포인트는 동작하지만 서울 공급자 행을 노출하지 않고, 반대로 세종은 TAGO에서 실제 PM 공급자와 장치 위치 스냅샷을 받을 수 있습니다. 따라서 주제는 크게 두 방향으로 pivot할 수 있습니다.
+```bash
+tail -n 1 data/processed/sejong_tago/collector_runs.jsonl
+```
 
-1. 세종시로 pivot: 실제 공유 PM 장치 스냅샷을 반복 수집해 공급/활동/경쟁 밀도 기반 배치 최적화 문제로 전환
-2. 서울 따릉이 데이터 기반으로 pivot: 실제 PM 관측 대신 따릉이 OD 이동 이력을 PM 유사 수요 proxy로 사용해 서울 내 latent demand 기반 배치 최적화 문제로 전환
+정적 페이지 확인:
 
-### Pivot A. 세종 TAGO 기반 PM 배치 최적화
+```bash
+curl -I http://127.0.0.1:8080/optimization_model.html
+```
 
-세종 pivot의 장점은 실제 PM 장치 단위 관측값을 확보할 수 있다는 점입니다. TAGO `PersonalMobilityInfo`에서 세종 공급자와 장치 목록이 노출되므로, 서울보다 데이터 수집 가능성이 높고 5분 단위 cron 수집으로 시간축이 있는 패널 데이터를 만들 수 있습니다.
+Cloudflare quick tunnel URL 확인:
 
-수집 가능한 데이터:
+```bash
+grep -Eo 'https://[^ ]+\.trycloudflare\.com' logs/sejong_tago_cloudflared.log | tail -1
+```
 
-| 데이터 | 수집/생성 경로 | 최적화에서의 용도 |
-| --- | --- | --- |
-| 공급자 목록 | `GetPMProvider`, `cityName=세종` 검증 | operator 집합, 사업자별 경쟁 밀도 |
-| 장치 스냅샷 | `GetPMListByProvider(providerName, cityCode)` | `operator_name`, `device_id`, `battery_level`, `latitude`, `longitude`, `timestamp` |
-| 유효 장치 수 | `battery_threshold` 이상 장치 집계 | 실제 서비스 가능한 공급량 추정 |
-| 500m grid zone | `src/collect_sejong_tago.py`의 `add_grid_zone` | 행정동 경계가 없어도 사용할 기본 공간 단위 |
-| zone별 장치 수 | `sejong_pm_zone_snapshot_counts.csv` | zone별 공급/경쟁 밀도, capacity 산정 |
-| 사업자별 장치 수 | `sejong_pm_operator_snapshot_counts.csv` | GCOO와 경쟁사 비중, 시장 검증 신호 |
-| 장치 interval | `sejong_pm_device_intervals.csv` | 반복 스냅샷 사이 이동 여부, 이동 거리, 속도, 배터리 변화 |
-| zone별 활동량 | `sejong_pm_activity_by_zone.csv` | 대여 이벤트가 없을 때의 수요 proxy |
+---
 
-세종 데이터의 핵심 한계는 TAGO가 대여 시작/종료 이벤트를 직접 주지 않는다는 점입니다. 따라서 수요는 실제 trip count가 아니라 반복 스냅샷에서 관측되는 장치 이동과 위치 밀도로 추정해야 합니다.
-
-수요 도출 방식:
-
-1. 동일 `operator_name`, `device_id`를 시간순으로 정렬합니다.
-2. 직전 스냅샷과 현재 스냅샷 사이의 거리, 시간, 속도를 계산합니다.
-3. `moved_50m`, `moved_200m` 같은 이동 flag를 pickup/drop-off의 proxy로 사용합니다.
-4. 직전 zone을 `origin_zone_id`로 보고 `moved_200m_count`, `moved_50m_count`, `interval_count`를 zone별 활동량으로 집계합니다.
-5. 너무 짧은 노이즈 이동, GPS 튐, 너무 긴 interval은 필터링하거나 가중치를 낮춥니다.
-6. zone별 수요 점수 `H_is`는 다음처럼 둘 수 있습니다.
+## Repository Layout
 
 ```text
-H_is = moved_200m_count
-     + gamma_50 * moved_50m_count
-     + gamma_density * effective_device_count
+.
+├── Data_Model_Sheet.md
+├── Spec.md
+├── README.md
+├── config/
+│   └── model_config.yaml
+├── scripts/
+│   └── setup_sejong_tago_cron.sh
+├── src/
+│   ├── collect_sejong_tago.py
+│   ├── visualize_sejong_tago.py
+│   ├── visualize_optimization_model.py
+│   ├── data_input.py
+│   ├── common.py
+│   └── ...
+├── data/
+│   ├── raw/
+│   └── processed/sejong_tago/
+└── outputs/
+    └── visualizations/
 ```
 
-여기서 `s`는 날짜/시간대 시나리오입니다. `effective_device_count`는 배터리 기준을 통과한 장치 수이며, 이동량이 적은 시간대에도 반복적으로 PM이 놓이는 zone을 시장 검증 신호로 반영합니다. 최종 모델에서는 `H_is`를 총 공급량과 평균 회전율(`u0_avg_rides_per_scooter_day`)에 맞춰 scale factor `alpha`로 보정합니다.
+---
 
-기본 decision variable:
+## Important Files
 
-| 변수 | 의미 |
+| File | 설명 |
 | --- | --- |
-| `x_i` | zone `i`에 배치할 GCOO scooter 수 |
-| `K_i` | zone `i`의 최대 수용량 |
-| `c_is` | 시나리오 `s`에서 zone `i`의 경쟁사 PM 수 |
-| `a_is` | 수요와 경쟁 밀도를 합친 유효 시장 크기 |
-| `q_is(x_i, c_is)` | 배치 `x_i`에서 기대되는 GCOO 이용량 |
+| `Data_Model_Sheet.md` | 과제 보고서에 들어갈 data/model explanation |
+| `src/collect_sejong_tago.py` | 5분 refresh pipeline entry point |
+| `src/visualize_optimization_model.py` | non-linear optimization model dashboard generator |
+| `src/visualize_sejong_tago.py` | Sejong map/chart visualization generator |
+| `scripts/setup_sejong_tago_cron.sh` | cron/static server/tunnel setup |
+| `config/model_config.yaml` | model, API, cost, simulation parameter 설정 |
 
-현재 프로토타입의 수요 포착 함수는 다음 형태입니다.
+---
 
-```text
-q_is = min(
-  a_is * (1 - exp(-beta * x_i / (1 + theta * c_is))),
-  U_max * x_i
-)
-```
+## Current Limitations
 
-해석은 다음과 같습니다.
+- TAGO snapshot은 실제 대여 시작/종료 event log가 아니므로, ride demand는 device movement interval에서 추정합니다.
+- 현재 dashboard는 외부 commercial MINLP solver를 호출하지 않고, model을 설명하고 결과를 시각화하기 위한 Python routine을 사용합니다.
+- `p_i`, `v`, `c_i`, `ρ`, `U`, `β`, `θ`, `λ`는 baseline assumption이며 실제 GCOO 내부 정산/운영 데이터가 있으면 보정해야 합니다.
+- GPS noise, 수거/재배치 이동, 실제 이용 이동이 snapshot interval 안에서 섞일 수 있으므로 inferred ride는 proxy입니다.
+- 현재 모델은 500m grid zone 단위이며, 실제 sidewalk-level parking constraints는 반영하지 않습니다.
 
-- `x_i`가 늘면 기대 이용량은 증가하지만 포화됩니다.
-- `c_is`가 높으면 같은 `x_i`에서도 경쟁 압력이 커져 포착률이 낮아집니다.
-- `U_max`는 scooter 1대가 하루에 처리할 수 있는 최대 이용 횟수입니다.
-- `lambda_market_validation`을 통해 경쟁사 장치가 많은 zone을 "이미 시장이 검증된 곳"으로 일부 가산할 수 있습니다.
+---
 
-목적함수는 기대 이익 극대화로 잡되, 매일 04:00 재배치 비용을 명시적으로 차감합니다.
+## Suggested Report Framing
 
-```text
-maximize over x:
-  E_s [ sum_i ((revenue_per_ride_krw_i - variable_cost_per_ride_krw)
-                * q_is(x_i, c_is)
-                - fixed_cost_per_scooter_day_krw_i * x_i) ]
-  - rebalancing_cost_krw(x)
+보고서에서는 다음 흐름이 가장 자연스럽습니다.
 
-where:
-  rebalancing_cost_krw(x)
-    = rebalancing_krw_per_scooter_km
-      * expected_return_distance_km_per_used_scooter_i
-      * expected_used_scooters_i(x)
-```
+1. Sejong TAGO PM snapshot data description
+2. 500m grid zone construction
+3. Device interval에서 inferred ride와 OD flow 추정
+4. Linear Optimization baseline
+5. Non-linear demand capture 기반 main model
+6. ALPACA competition effect
+7. Fleet/capacity/throughput constraints
+8. Profit-maximizing objective
+9. Simulation으로 demand/cost shock 아래 robustness 평가
+10. 최종 배치 `x*`의 business interpretation
 
-거리 자체는 목적함수 value가 아닙니다. OD에서 나온 km는 원화 비용을 계산하기 위한 물리량으로만 쓰고, 모델의 수익/비용/목적함수 산출값은 모두 KRW입니다.
-
-세종 pivot에서는 `revenue_per_ride_krw_i`를 실제 결제 데이터 없이 직접 관측할 수 없으므로, 평균 이동 거리 또는 평균 이동 시간 proxy로 추정합니다. 초기값은 현재 설정처럼 `unlock_fee_krw`와 `per_minute_fee_krw` 가정을 사용하고, 이후 실제 GCOO 요금/정산 데이터가 생기면 KRW 매출값을 교체합니다.
-
-필수 제약식:
+프로젝트의 핵심 문장은 다음처럼 정리할 수 있습니다.
 
 ```text
-0 <= x_i <= K_i
-sum_i x_i <= F
-x_i integer
+This project formulates Sejong GBIKE 04:00 deployment as a profit-maximizing
+non-linear optimization problem where demand capture saturates with deployment,
+weakens under ALPACA competition, and is evaluated under demand/cost uncertainty.
 ```
-
-권장 제약식:
-
-| 제약 | 설명 |
-| --- | --- |
-| zone capacity | `K_i = ceil(capacity_multiplier * p95(total_pm_count_is))` 또는 zone 면적/주차 가능 공간 기반 상한 |
-| total fleet | 전체 투입 가능 scooter 수 `F`를 넘지 않음 |
-| serviceable battery | 배터리 기준 미달 장치는 공급량/수요 추정에서 제외 |
-| activity threshold | 반복 관측 기간 동안 활동량이 너무 낮은 zone에는 `x_i=0` 또는 낮은 `K_i` 적용 |
-| rebalancing budget | 확장 모델에서 `r_ij`를 도입하면 총 재배치 거리/비용 제한 |
-| operator exposure | 특정 경쟁사가 과점한 zone에 대한 최대 노출 또는 risk penalty |
-
-현재 구현은 `r_ij`를 명시 decision variable로 두지는 않지만, 선택된 `x_i`마다 다음 절차로 재배치 비용을 목적함수에 반영합니다.
-
-1. 따릉이 PM 유사 OD에서 `origin_dong_id -> destination_dong_id` 전이확률과 평균 거리를 계산합니다.
-2. `q_is(x_i, c_is)`가 발생한 만큼 영업 종료 후 장치가 목적지 행정동에 남는다고 추정합니다.
-3. 행정동별 평균 원복거리 `E[dist(destination, origin)]`를 각 추가 배치의 marginal relocation distance로 계산합니다.
-4. `rebalancing_krw_per_scooter_km`를 곱해 `rebalancing_cost_krw`로 변환한 뒤 marginal profit KRW와 최종 기대 영업이익 KRW에서 차감합니다.
-
-향후 정확한 min-cost flow를 쓰려면 `r_ij`를 명시 변수로 두고 `sum_j r_ij`, `sum_i r_ij` 보존 제약을 추가하면 됩니다.
-
-세종 pivot이 적합한 경우:
-
-- 실제 PM 장치 위치와 경쟁 밀도를 기반으로 한 주제를 원할 때
-- 단기간에 반복 수집 가능한 데이터가 필요할 때
-- 서울이라는 지역 제약보다 "공유 PM 배치 최적화" 자체가 더 중요할 때
-
-### Pivot B. 서울 따릉이 데이터 기반 PM 유사 수요 최적화
-
-서울 따릉이 pivot은 지역을 서울로 유지할 수 있다는 장점이 있습니다. 대신 이 방향은 "실제 PM 관측 기반 최적화"가 아니라 "따릉이 이동 이력을 PM 유사 단거리 이동 수요 proxy로 사용하는 서울 배치 최적화"로 정의해야 합니다.
-
-수집 가능한 데이터:
-
-| 데이터 | 수집/생성 경로 | 최적화에서의 용도 |
-| --- | --- | --- |
-| 따릉이 대여소 위치 | 서울 `bikeList` | station ID, 이름, 위도/경도, 행정동 mapping |
-| 따릉이 이동 이력 | 서울 열린데이터 `tbCycleRentData` | 대여/반납 시각, 출발/도착 대여소, 거리, 이용 시간 |
-| 서울 행정동 경계 | `src/fetch_seoul_boundary.py` | station과 trip을 행정동으로 변환 |
-| PM 견인 이벤트 | 서울 열린데이터 `tbAutoKickboard` | PM 마찰/불법주차가 나타난 지역 proxy |
-| PM 주차구역 | 서울 열린데이터 `parkingKickboard` | PM 주차 가능성 또는 제도적 수용성 proxy |
-| 민간 PM 사업자 요약 | `seoul_private_pm_operator_summary.csv` | 경쟁사 총량 prior |
-
-이 pivot에서 직접 수집하기 어려운 데이터는 서울의 실시간 PM 장치 위치, GCOO 실제 대여/매출, 경쟁사별 실제 장치 배치입니다. 따라서 경쟁 PM 수는 실제 관측이 아니라 수요, 견인 이벤트, PM 주차구역, 사업자 요약을 합친 surrogate로 만들어야 합니다.
-
-수요 도출 방식:
-
-1. `bikeList`로 대여소 좌표를 가져오고, 행정동 경계와 spatial join하여 `station_id -> dong_id`를 만듭니다.
-2. `tbCycleRentData`에서 날짜/시간대별 따릉이 이동 이력을 가져옵니다.
-3. PM과 유사한 이동만 남깁니다. 현재 설정 기준은 다음과 같습니다.
-
-```text
-0.5km <= distance <= 3.0km
-3min <= duration <= 20min
-5km/h <= speed <= 25km/h
-origin_dong_id != destination_dong_id
-```
-
-4. 새벽 4시 이전 이동은 전날 operating day로 묶어 야간 이동을 같은 영업일에 포함합니다.
-5. 출발 행정동 기준으로 `H_is`와 `departures_is`를 집계하고, 도착 행정동 기준으로 `arrivals_is`를 집계합니다.
-6. 평균 이동 거리 `avg_distance_km_i`는 예상 요금 `revenue_per_ride_krw_i` 계산에만 사용합니다.
-7. 전체 수요 규모는 총 fleet `F`와 평균 회전율 `u0_avg_rides_per_scooter_day`를 이용해 scooter 이용 수요로 scaling합니다.
-
-서울 따릉이 pivot의 decision variable은 세종과 동일하게 시작할 수 있습니다.
-
-| 변수 | 의미 |
-| --- | --- |
-| `x_i` | 행정동 `i`에 배치할 GCOO scooter 수 |
-| `H_is` | 시나리오 `s`에서 행정동 `i`의 PM 유사 따릉이 출발 수요 |
-| `arrivals_is`, `departures_is` | 행정동별 유입/유출 불균형 |
-| `B_i` | `abs(arrivals - departures) / (arrivals + departures + 1)`로 계산한 imbalance score |
-| `K_i` | 행정동별 배치 capacity |
-| `c_is` | surrogate 경쟁 PM 수 |
-
-목적함수는 세종과 같은 기대 이익 극대화 구조를 사용할 수 있습니다.
-
-```text
-maximize over x:
-  E_s [ sum_i ((revenue_per_ride_krw_i - variable_cost_per_ride_krw)
-                * q_is(x_i, c_is)
-                - fixed_cost_per_scooter_day_krw_i * x_i) ]
-  - rebalancing_cost_krw(x)
-```
-
-서울 pivot에서는 각 항목을 다음처럼 정의합니다.
-
-- `H_is`: PM 유사 조건을 통과한 따릉이 출발 trip 수
-- `revenue_per_ride_krw_i`: `avg_distance_km_i / avg_scooter_speed_kmph * 60`으로 계산한 예상 이용 시간에 `unlock_fee_krw`와 `per_minute_fee_krw`를 적용한 원화 매출
-- `fixed_cost_per_scooter_day_krw_i`: 기본 일별 운영비 KRW에 imbalance penalty를 더한 원화 비용
-- `K_i`: 실제 TAGO PM이 없으면 수요, 견인 이벤트, 주차구역, 사업자 총량 prior로 만든 surrogate capacity
-- `c_is`: PM 견인/주차/사업자 요약과 수요 가중치로 만든 surrogate competitor count
-
-필수 제약식:
-
-```text
-0 <= x_i <= K_i
-sum_i x_i <= F
-x_i integer
-```
-
-권장 제약식:
-
-| 제약 | 설명 |
-| --- | --- |
-| demand support | PM 유사 따릉이 수요가 거의 없는 행정동은 배치 후보에서 제외 |
-| capacity | 실제 PM 관측이 없으므로 `K_i`를 수요 분위수, PM 주차구역, 견인 이벤트, 도로/상권 proxy로 보수적으로 제한 |
-| imbalance penalty | 유출입 차이가 큰 곳은 기본 운영비 KRW 증가 |
-| AM rebalancing cost | 영업 종료 후 추정 위치에서 다음날 04:00 목표 배치로 옮기는 비용을 KRW로 차감 |
-| district fairness | 특정 구에만 모든 fleet이 몰리지 않도록 구별 최소/최대 비중 설정 가능 |
-| scenario robustness | 특정 날짜 하루가 아니라 여러 operating day 평균 또는 하위 분위 수익에도 견디는 배치 선택 |
-
-서울 pivot에서 확장할 수 있는 형태는 unmet demand 또는 service level 변수를 추가하는 것입니다.
-
-| 변수 | 의미 |
-| --- | --- |
-| `u_is` | 행정동 `i`, 시나리오 `s`에서 충족하지 못한 PM 유사 수요 |
-| `z_i` | 행정동 `i`를 서비스 후보로 열지 여부 |
-| `r_ij` | 행정동 `i`에서 `j`로 재배치하는 scooter 수 |
-
-이 경우 목적함수는 수익 극대화와 미충족 수요 penalty를 함께 둘 수 있습니다.
-
-```text
-maximize:
-  expected_profit_krw(x)
-  - unmet_demand_penalty_krw_per_ride * sum_i_s u_is
-  - rebalancing_cost_krw(x)
-```
-
-서울 따릉이 pivot이 적합한 경우:
-
-- 분석 대상 지역을 반드시 서울로 유지해야 할 때
-- 공유 PM의 직접 관측보다 단거리 이동 수요 추정과 공간 최적화가 핵심일 때
-- 논문/보고서 주제를 "따릉이 OD 기반 PM 잠재 수요 추정 및 배치 최적화"로 명확히 재정의할 수 있을 때
-
-### 두 Pivot의 선택 기준
-
-| 기준 | 세종 TAGO pivot | 서울 따릉이 pivot |
-| --- | --- | --- |
-| 실제 PM 장치 관측 | 가능 | 현재 불가 |
-| 수요 관측 | 직접 trip은 불가, 스냅샷 이동으로 추정 | 따릉이 OD trip으로 proxy 구성 가능 |
-| 지역 일관성 | 서울에서 세종으로 변경 | 서울 유지 |
-| 경쟁 밀도 | 실제 PM 장치 수 기반 | surrogate 기반 |
-| 모델 신뢰도 | 공급/경쟁 밀도는 강함, 수요는 추정 | 수요 proxy는 강함, PM 공급/경쟁은 약함 |
-| 추천 주제명 | "세종시 공유 PM 스냅샷 기반 배치 최적화" | "서울 따릉이 OD 기반 PM 유사 수요 추정 및 배치 최적화" |
-
-실제 PM 운영 최적화에 가까운 결과가 필요하면 세종 pivot이 더 낫습니다. 서울이라는 정책/공간 맥락이 중요하고 PM을 "따릉이 단거리 이동의 대체 수단"으로 모델링해도 되는 주제라면 서울 따릉이 pivot이 더 적합합니다.
-
-## 시각화 설정
-
-시각화는 이 프로젝트의 주된 검사 화면입니다. 현재 설정은 두 개의 독립 실행형 interactive HTML 파일을 생성합니다.
-
-1. `charts_dashboard.html`: 최적화/시나리오 CSV 기반 수치 차트
-2. `seoul_map.html`: 행정동 경계, heatmap, 자전거 대여소 marker를 포함한 서울 지도 overlay
-
-이 설정은 React 앱을 추가하지 않고 Python 패키지를 의도적으로 사용합니다.
-
-- `pyecharts`: Apache ECharts 기반 interactive chart dashboard
-- `folium`: Leaflet 기반 map overlay 및 heatmap 렌더링
-- `branca`: map overlay 색상 스케일 지원
-
-### 1. 시각화 의존성 설치
-
-저장소 루트에서 한 번 실행합니다.
-
-```bash
-python3 -m pip install -r requirements.txt
-```
-
-일반 데이터/모델 의존성과 함께 다음 패키지가 설치됩니다.
-
-```text
-pyecharts
-folium
-branca
-```
-
-### 2. 서울 행정동 경계 준비
-
-지도 시각화 코드는 다음 파일을 찾습니다.
-
-```text
-data/raw/seoul_admin_dong.geojson
-```
-
-다음 명령으로 생성합니다.
-
-```bash
-python3 src/fetch_seoul_boundary.py --out data/raw/seoul_admin_dong.geojson
-```
-
-예상 출력:
-
-```text
-boundary=data/raw/seoul_admin_dong.geojson
-features=426
-source=https://raw.githubusercontent.com/vuski/admdongkor/master/ver20250401/HangJeongDong_ver20250401.geojson
-```
-
-이 파일이 없으면 `src/visualize.py`는 `src/prototype_pipeline.py`의 작은 fixture bounding box로 fallback하여 계속 실행됩니다. 이 fallback은 스모크 테스트 전용입니다. 실제 시각 검토에는 실제 GeoJSON을 사용하세요.
-
-### 3. 시각화할 데이터 생성
-
-빠른 로컬 스모크 테스트를 위해 fixture 기반 프로토타입 산출물을 생성합니다.
-
-```bash
-python3 src/prototype_pipeline.py --out outputs/prototype
-```
-
-실제 모델 산출물은 대신 모델 파이프라인을 실행합니다.
-
-```bash
-python3 src/model.py --out outputs/model
-```
-
-실제 서울 매칭 TAGO PM 스냅샷이 아직 없으면 모델은 준비 상태 보고서만 쓸 수 있습니다. 이 경우 시각화 스모크 테스트에는 `outputs/prototype` 또는 `outputs/model_fixture`를 사용합니다.
-
-```bash
-python3 src/model.py --out outputs/model_fixture --allow-fixtures
-```
-
-### 4. 시각화 HTML 렌더링
-
-모델/프로토타입 출력 디렉터리에서 차트와 지도 산출물을 모두 렌더링합니다.
-
-```bash
-python3 src/visualize.py --input outputs/prototype --out outputs/visualizations
-```
-
-또는:
-
-```bash
-python3 src/visualize.py --input outputs/model --out outputs/visualizations
-```
-
-예상 출력:
-
-```text
-charts=outputs/visualizations/charts_dashboard.html
-map=outputs/visualizations/seoul_map.html
-map_metric=<selected_metric>
-boundary_source=geojson
-```
-
-생성 파일:
-
-```text
-outputs/visualizations/charts_dashboard.html
-outputs/visualizations/seoul_map.html
-outputs/visualizations/visualization_manifest.json
-```
-
-`visualization_manifest.json`은 사용된 입력 디렉터리, 로드된 테이블, 선택된 지도 지표, 지도가 실제 GeoJSON 경계를 사용했는지 fixture bounding box를 사용했는지를 기록합니다.
-
-### 5. 지도 overlay 지표 선택
-
-기본적으로 시각화 코드는 `--map-metric auto`를 사용합니다. Auto 모드는 다음 순서로 0이 아닌 값을 가진 첫 번째 유용한 지표를 선택합니다.
-
-```text
-x_star_i
-mean_H
-mean_total_pm_count
-mean_competitor_count
-x_obs_i
-K_i
-```
-
-특정 질문을 검사할 때는 지표를 명시적으로 override합니다.
-
-```bash
-python3 src/visualize.py --input outputs/model --out outputs/visualizations --map-metric x_star_i
-python3 src/visualize.py --input outputs/model --out outputs/visualizations --map-metric mean_H
-python3 src/visualize.py --input outputs/model --out outputs/visualizations --map-metric mean_competitor_count
-```
-
-주요 지표 의미:
-
-| Metric | Meaning |
-| --- | --- |
-| `x_star_i` | 행정동별 최적화된 GCOO 킥보드 배치 |
-| `mean_H` | 행정동별 평균 PM 유사 수요 |
-| `mean_competitor_count` | 행정동별 평균 경쟁사 PM 수 |
-| `mean_gcoo_count` | 행정동별 평균 관측 GCOO PM 수 |
-| `K_i` | 최적화 모델에서 사용한 행정동 용량 |
-| `expected_operating_profit_krw` | 재배치 전 기대 영업이익 KRW |
-| `expected_rebalancing_cost_krw` | 04:00 재배치 비용 KRW |
-| `expected_profit_after_rebalancing_krw` | 영업이익 KRW에서 재배치 비용 KRW를 차감한 목적함수 값 |
-| `rebalancing_krw_per_scooter_km` | scooter 1대를 1km 재배치하는 원화 단가 |
-| `B_i` | 도착/출발 기반 불균형 점수 |
-
-### 6. 브라우저에서 시각화 열기
-
-출력 파일은 정적 HTML입니다. 가장 안정적인 확인 방법은 저장소를 로컬에서 serve하는 것입니다.
-
-```bash
-python3 -m http.server 8765 --bind 127.0.0.1
-```
-
-그다음 다음 주소를 엽니다.
-
-```text
-http://127.0.0.1:8765/outputs/visualizations/charts_dashboard.html
-http://127.0.0.1:8765/outputs/visualizations/seoul_map.html
-```
-
-포트 `8765`를 이미 사용 중이면 다른 포트를 선택합니다.
-
-```bash
-python3 -m http.server 8770 --bind 127.0.0.1
-```
-
-서버는 `Ctrl+C`로 중지할 수 있습니다.
-
-### 7. 시각화 입력 계약
-
-`src/visualize.py`는 선택된 `--input` 디렉터리에 `src/model.py` 또는 `src/prototype_pipeline.py`가 쓴 CSV 산출물이 있다고 가정합니다.
-
-| File | Required | Used for |
-| --- | --- | --- |
-| `allocation_optimized.csv` | allocation chart에는 yes | 최적화 배치 차트 및 `x_star_i` map layer |
-| `model_inputs.csv` | recommended | 용량, 관측 공급량, 불균형 진단 |
-| `demand_scenario.csv` | recommended | 수요 차트 및 `mean_H` map layer |
-| `tago_scenario.csv` | recommended | GCOO/경쟁사 수 차트 |
-| `bike_stations_with_dong.csv` 또는 `bike_stations_normalized.csv` | recommended | 대여소 marker 및 대여소 heatmap |
-| `dong_master.csv` | recommended | 읽기 쉬운 행정동 label |
-
-선택 파일:
-
-| File | Used for |
-| --- | --- |
-| `data/raw/seoul_admin_dong.geojson` | 실제 서울 행정동 polygon overlay |
-| `data/raw/tago_pm_snapshots_*.csv` | 사용 가능한 경우 원시 PM point heatmap |
-
-### 8. 문제 해결
-
-지도에서 `boundary_source=fixture_bbox`가 출력되면 실제 서울 경계 파일을 찾지 못한 것입니다. 다음을 실행하세요.
-
-```bash
-python3 src/fetch_seoul_boundary.py --out data/raw/seoul_admin_dong.geojson
-```
-
-지도가 렌더링되지만 overlay 값이 모두 0이면 선택한 `--map-metric`이 입력 CSV에 없거나 0일 가능성이 큽니다. 다음을 시도하세요.
-
-```bash
-python3 src/visualize.py --input outputs/prototype --out outputs/visualizations --map-metric mean_H
-```
-
-`outputs/model`에 `model_readiness.json`만 있으면 모델이 최적화할 만큼 충분한 실제 입력 데이터를 확보하지 못한 것입니다. 시각화 스모크 테스트에는 fixture 모드를 사용합니다.
-
-```bash
-python3 src/model.py --out outputs/model_fixture --allow-fixtures
-python3 src/visualize.py --input outputs/model_fixture --out outputs/visualizations
-```
-
-브라우저 로딩이 오래된 것처럼 보이면 시각화 코드를 다시 실행하고 브라우저 페이지를 새로고침합니다.
-
-```bash
-python3 src/visualize.py --input outputs/prototype --out outputs/visualizations
-```
-
-## 실행
-
-접근 가능한 API 확인:
-
-```bash
-python3 src/api_probe.py --out outputs/api_probe
-```
-
-프로토타입 변환과 작은 배치 예제 실행:
-
-```bash
-python3 src/prototype_pipeline.py --out outputs/prototype
-```
-
-생성되는 파일:
-
-```text
-outputs/api_probe/api_probe_summary.json
-outputs/api_probe/api_probe_findings.md
-outputs/prototype/dong_master.csv
-outputs/prototype/bike_stations_normalized.csv
-outputs/prototype/bike_trip_pm_like.csv
-outputs/prototype/demand_scenario.csv
-outputs/prototype/tago_scenario.csv
-outputs/prototype/model_inputs.csv
-outputs/prototype/allocation_optimized.csv
-outputs/prototype/prototype_report.md
-```
-
-프로토타입은 스모크 테스트용 작은 fixture를 사용합니다. 실제 파이프라인은 `src/data_input.py`와 도시 검증을 통과한 `data/raw/tago_pm_snapshots_*.csv`를 사용합니다.
