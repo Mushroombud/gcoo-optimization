@@ -22,6 +22,11 @@ FIXED_COST_PER_DEVICE_KRW = 2500.0
 REBALANCING_KRW_PER_KM = 900.0
 CAPACITY_MULTIPLIER = 1.25
 OPTIMIZATION_FLEET = 500
+OPERATOR_MOVE_FILTER_NOTE = (
+    "D_i and OD flows use only ride segments where excluded_from_demand is false. "
+    "Segments flagged as likely operator moves are removed when speed > 28km/h, "
+    "or speed > 25km/h with repeated fast moves, same OD/time clusters, or large battery delta."
+)
 
 
 def read_csv(path: Path) -> pd.DataFrame:
@@ -101,6 +106,13 @@ def build_zone_model(processed_dir: Path) -> tuple[pd.DataFrame, dict[str, Any]]
     model = centers.merge(supply[["zone_id", "gbike_current", "alpaca_competitor"]], on="zone_id", how="left")
     model[["gbike_current", "alpaca_competitor"]] = model[["gbike_current", "alpaca_competitor"]].fillna(0.0)
 
+    raw_segment_count = int(len(segments))
+    excluded_segment_count = 0
+    if not segments.empty and "excluded_from_demand" in segments.columns:
+        excluded_mask = segments["excluded_from_demand"].astype(str).str.lower().isin({"true", "1", "yes"})
+        excluded_segment_count = int(excluded_mask.sum())
+        segments = segments[~excluded_mask].copy()
+
     if not segments.empty and {"prev_zone_id", "distance_m", "speed_kmph", "battery_delta"}.issubset(segments.columns):
         seg = segments.copy()
         seg["prev_zone_id"] = seg["prev_zone_id"].astype(str)
@@ -172,8 +184,11 @@ def build_zone_model(processed_dir: Path) -> tuple[pd.DataFrame, dict[str, Any]]
         "gbike_devices": int(latest_counts.get("GBIKE", 0)),
         "alpaca_devices": int(latest_counts.get("ALPACA", 0)),
         "zones": int(model["zone_id"].nunique()),
+        "raw_ride_segments": raw_segment_count,
         "ride_segments": int(len(segments)),
+        "excluded_operator_move_segments": excluded_segment_count,
         "od_pairs": int(len(od_flows)),
+        "operator_move_filter_note": OPERATOR_MOVE_FILTER_NOTE,
     }
     return model, meta
 
@@ -561,10 +576,14 @@ def static_parameter_table(fleet_size: int) -> str:
 
 def data_parameter_table() -> str:
     rows = [
-        (r"\(D_i\)", "inferred ride origin count", "GBIKE 이동 segment에서 추정한 zone별 기본 수요"),
+        (
+            r"\(D_i\)",
+            "clean inferred ride origin count",
+            "운영자 이동 의심 flag가 없는 GBIKE 이동 segment만 사용한 zone별 기본 수요",
+        ),
         (r"\(C_i\)", "latest ALPACA supply", "zone별 ALPACA 경쟁 공급량"),
         (r"\(K_i\)", r"\(\lceil \kappa \cdot \text{current PM supply}_i \rceil\)", "zone별 최대 배치 가능량"),
-        (r"\(r_i(x_i)\)", "OD flow 기반", "이용 후 흩어진 PM을 회수/재배치하는 비용"),
+        (r"\(r_i(x_i)\)", "clean OD flow 기반", "운영자 이동 의심 segment를 제외한 OD로 추정한 회수/재배치 비용"),
     ]
     body = "".join(
         f'<tr><td class="math-cell">{symbol}</td><td>{value}</td><td>{safe(note)}</td></tr>'
@@ -659,6 +678,9 @@ def render_model_map(rows: pd.DataFrame, out_path: Path) -> None:
 def render_html(rows: pd.DataFrame, meta: dict[str, Any], solution: dict[str, Any], out_path: Path) -> None:
     active_rows = rows[rows["x_star"] > 0]
     best_zone = str(active_rows.iloc[0]["zone_id"]) if not active_rows.empty else "n/a"
+    raw_ride_segments = int(meta.get("raw_ride_segments", meta.get("ride_segments", 0)))
+    clean_ride_segments = int(meta.get("ride_segments", 0))
+    excluded_operator_moves = int(meta.get("excluded_operator_move_segments", 0))
     html_text = f"""<!doctype html>
 <html lang="ko">
 <head>
@@ -782,6 +804,7 @@ def render_html(rows: pd.DataFrame, meta: dict[str, Any], solution: dict[str, An
             <div class="math">\\[A_i=D_i\\left(1+\\lambda\\frac{{\\log(1+C_i)}}{{\\log(1+C_{{\\max}})}}\\right)\\]</div>
             <div class="equation-note">
               <strong>모델링 근거:</strong> <code>D_i</code>는 GBIKE device movement에서 추정한 기본 수요입니다. 하지만 경쟁사 PM이 많이 놓인 지역은 단순히 경쟁이 심한 곳일 뿐 아니라, PM 시장이 실제로 존재한다고 검증된 지역일 수도 있습니다.
+              <br><strong>운영자 이동 제외:</strong> <code>D_i</code>와 OD flow는 운영자가 차량으로 이동시킨 것으로 의심되는 segment를 제외한 clean movement만 사용합니다.
               <br><strong>왜 log인가:</strong> 경쟁사가 0대에서 10대로 늘어나는 것은 강한 시장 신호지만, 100대에서 110대로 늘어나는 것은 추가 정보가 상대적으로 작습니다. 그래서 <code>log(1+C_i)</code>를 사용해 market validation 효과도 체감하도록 설계했습니다.
               <br><strong>λ의 의미:</strong> <code>λ</code>는 경쟁사 존재를 잠재수요 증가 신호로 얼마나 강하게 볼지 정하는 parameter입니다.
             </div>
@@ -798,6 +821,10 @@ def render_html(rows: pd.DataFrame, meta: dict[str, Any], solution: dict[str, An
         <div class="table-wrap compact-table" style="max-height:none;">{static_parameter_table(OPTIMIZATION_FLEET)}</div>
         <h3 style="margin-top:16px;">Data-derived Parameters 데이터에서 계산되는 값</h3>
         <div class="table-wrap compact-table" style="max-height:none;">{data_parameter_table()}</div>
+        <div class="equation-note" style="margin-top:10px;">
+          <strong>운영자 이동 제외 Rule:</strong> 속도 &gt; 28km/h, 또는 속도 &gt; 25km/h이면서 30분 내 반복 고속 이동, 같은 시간/OD의 2대 이상 군집, 배터리 변화량 절댓값 20pp 이상인 segment는 <code>excluded_from_demand=true</code>로 두고 수요/OD 계산에서 제외합니다.
+          이번 run에서는 raw ride segment {fmt_int(raw_ride_segments)}건 중 {fmt_int(excluded_operator_moves)}건을 제외하고 {fmt_int(clean_ride_segments)}건을 사용했습니다.
+        </div>
       </div>
     </section>
 

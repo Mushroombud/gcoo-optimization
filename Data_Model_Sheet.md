@@ -88,8 +88,9 @@ i ∈ I = 세종특별시 500m grid zone 집합
 | `sejong_pm_zone_snapshot_counts.csv` | 시점별 zone/operator별 공급량 |
 | `sejong_pm_device_intervals.csv` | 같은 device의 연속 스냅샷 간 이동 |
 | `sejong_pm_activity_by_zone.csv` | zone/operator별 이동 activity summary |
-| `sejong_pm_inferred_rides.csv` | 이동 interval에서 추정한 ride segment |
-| `sejong_pm_od_flows.csv` | inferred ride의 origin-destination flow |
+| `sejong_pm_inferred_rides.csv` | 이동 interval에서 추정한 ride segment. 운영자 이동 의심 flag 포함 |
+| `sejong_pm_operator_move_candidates.csv` | 운영자가 차량/정비 과정에서 이동시킨 것으로 보이는 excluded segment |
+| `sejong_pm_od_flows.csv` | 운영자 이동 의심 segment를 제외한 clean inferred ride의 origin-destination flow |
 
 현재 주요 processed data 규모는 다음과 같다.
 
@@ -147,10 +148,23 @@ distance_m >= 100m
 - 평균 속도 약 12.4km/h는 PM의 도시 내 단거리 이동 속도와 맞는다.
 - 너무 긴 interval은 중간 경로를 알 수 없고, 너무 짧은 이동은 GPS 오차일 수 있다.
 
+추정 ride 중 운영자가 차량으로 이동시켰거나 배터리 교환/재배치 중인 것으로 보이는 segment는 별도 flag를 세우고 수요 계산에서 제외한다.
+
+| Column | 의미 |
+| --- | --- |
+| `operator_move_speed_rule` | `speed_kmph > 28`인 비정상 고속 이동 |
+| `operator_move_repeat_rule` | `speed_kmph > 25`인 고속 이동이 같은 기기에서 30분 내 2회 이상 반복 |
+| `operator_move_cluster_rule` | `speed_kmph > 25`인 이동이 같은 시간/OD에서 2대 이상 군집 |
+| `operator_move_battery_rule` | `speed_kmph > 25`이면서 배터리 변화량 절댓값이 20pp 이상 |
+| `operator_move_flag` | 위 rule 중 하나라도 참인 운영자 이동 의심 segment |
+| `operator_move_reason` | 적용된 rule code 목록 |
+| `excluded_from_demand` | `true`이면 `D_i`, OD flow, 최적화 수요 계산에서 제외 |
+
 zone별 기본 demand signal은 다음처럼 만든다.
 
 ```text
 D_i = inferred ride segments starting from zone i
+      where excluded_from_demand = false
 ```
 
 여기서 `D_i`는 실제 전체 수요가 아니라, snapshot 기반으로 관측된 수요의 proxy이다. 보고서에서는 필요하면 scaling parameter `η`를 둬서 다음처럼 확장할 수 있다.
@@ -439,12 +453,12 @@ x_i \in \mathbb{Z}_+
 
 | Parameter | 계산 방식 | 의미 |
 | --- | --- | --- |
-| `D_i` | `sejong_pm_inferred_rides.csv`의 origin zone별 count | zone별 기본 demand signal |
+| `D_i` | `sejong_pm_inferred_rides.csv` 중 `excluded_from_demand=false`인 origin zone별 count | zone별 기본 demand signal |
 | `C_i` | latest snapshot의 zone별 ALPACA device count | 경쟁사 공급량 |
 | `G_i` | latest snapshot의 zone별 GBIKE device count | 현재 GBIKE 공급량 |
 | `A_i` | `D_i(1 + λ log(1+C_i)/log(1+C_max))` | 보정된 잠재수요 |
 | `K_i` | `ceil(κ * current total PM supply_i)` | zone별 최대 배치 가능량 |
-| `L_i` | OD flow 기반 expected rebalancing km | 이용 후 PM 회수/재배치 거리 proxy |
+| `L_i` | clean OD flow 기반 expected rebalancing km | 이용 후 PM 회수/재배치 거리 proxy |
 | `r_i(x_i)` | `ρ * L_i * Q_i(x_i)` | 기대 재배치비 |
 
 현재 구현의 rebalancing cost는 다음 구조다.
@@ -453,7 +467,7 @@ x_i \in \mathbb{Z}_+
 r_i(x_i)=\rho L_i Q_i(x_i)
 ```
 
-`L_i`는 `sejong_pm_od_flows.csv`에서 origin zone `i`에서 출발한 ride들의 평균 이동거리로부터 추정한다. 즉, 어떤 zone에서 출발한 PM이 이용 후 얼마나 흩어질 가능성이 있는지를 비용으로 반영한다.
+`L_i`는 `sejong_pm_od_flows.csv`에서 origin zone `i`에서 출발한 clean ride들의 평균 이동거리로부터 추정한다. 즉, 운영자 이동 의심 segment를 제거한 뒤 어떤 zone에서 출발한 PM이 이용 후 얼마나 흩어질 가능성이 있는지를 비용으로 반영한다.
 
 ---
 

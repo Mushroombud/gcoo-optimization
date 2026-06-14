@@ -21,6 +21,7 @@ from prototype_pipeline import make_fixture_dongs
 
 SEOUL_CENTER = [37.5665, 126.9780]
 DEFAULT_TAGO_ICON_LIMIT = 5000
+DEFAULT_SEJONG_RIDE_SEGMENTS = Path("data/processed/sejong_tago/sejong_pm_inferred_rides.csv")
 PM_OPERATOR_COLORS = [
     "#0f766e",
     "#2563eb",
@@ -329,6 +330,142 @@ def make_model_scatter(metrics: pd.DataFrame) -> Scatter:
     )
 
 
+def operator_move_exclusion_summary(path: Path = DEFAULT_SEJONG_RIDE_SEGMENTS) -> dict[str, Any]:
+    if not path.exists():
+        return {
+            "available": False,
+            "path": str(path),
+            "raw_segments": 0,
+            "excluded_segments": 0,
+            "clean_segments": 0,
+            "excluded_devices": 0,
+            "speed_rule": 0,
+            "repeat_rule": 0,
+            "cluster_rule": 0,
+            "battery_rule": 0,
+        }
+    segments = read_csv_if_exists(path)
+    if segments.empty or "excluded_from_demand" not in segments.columns:
+        return {
+            "available": False,
+            "path": str(path),
+            "raw_segments": int(len(segments)),
+            "excluded_segments": 0,
+            "clean_segments": int(len(segments)),
+            "excluded_devices": 0,
+            "speed_rule": 0,
+            "repeat_rule": 0,
+            "cluster_rule": 0,
+            "battery_rule": 0,
+        }
+    excluded = segments["excluded_from_demand"].astype(str).str.lower().isin({"true", "1", "yes"})
+
+    def count_true(column: str) -> int:
+        if column not in segments.columns:
+            return 0
+        return int(segments[column].astype(str).str.lower().isin({"true", "1", "yes"}).sum())
+
+    return {
+        "available": True,
+        "path": str(path),
+        "raw_segments": int(len(segments)),
+        "excluded_segments": int(excluded.sum()),
+        "clean_segments": int((~excluded).sum()),
+        "excluded_devices": int(segments.loc[excluded, "device_id"].nunique()) if "device_id" in segments.columns else 0,
+        "speed_rule": count_true("operator_move_speed_rule"),
+        "repeat_rule": count_true("operator_move_repeat_rule"),
+        "cluster_rule": count_true("operator_move_cluster_rule"),
+        "battery_rule": count_true("operator_move_battery_rule"),
+    }
+
+
+def operator_move_exclusion_section(summary: dict[str, Any]) -> str:
+    data_note = (
+        f"현재 산출물 기준 raw segment {summary['raw_segments']:,}건 중 "
+        f"{summary['excluded_segments']:,}건을 제외하고 {summary['clean_segments']:,}건을 수요 계산에 사용합니다."
+        if summary.get("available")
+        else f"현재 이 dashboard run에서는 {summary['path']} 파일을 찾지 못해 집계값은 표시하지 않습니다."
+    )
+    return f"""
+<style>
+.operator-move-exclusion {{
+  background: #ffffff;
+  border: 1px solid #d9e0ea;
+  border-radius: 8px;
+  color: #172033;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  line-height: 1.58;
+  margin: 28px auto 40px;
+  max-width: 1180px;
+  padding: 20px 22px;
+}}
+.operator-move-exclusion h2 {{ font-size: 20px; margin: 0 0 8px; }}
+.operator-move-exclusion p {{ color: #5d687a; margin: 0 0 12px; }}
+.operator-move-exclusion-grid {{ display: grid; gap: 12px; grid-template-columns: 1fr 1fr; }}
+.operator-move-exclusion-card {{ background: #f8fafc; border: 1px solid #d9e0ea; border-radius: 8px; padding: 12px 14px; }}
+.operator-move-exclusion-card b {{ display: block; margin-bottom: 6px; }}
+.operator-move-exclusion ul {{ margin: 0; padding-left: 18px; }}
+.operator-move-exclusion li {{ margin: 4px 0; }}
+.operator-move-exclusion table {{ border-collapse: collapse; margin-top: 8px; width: 100%; }}
+.operator-move-exclusion th, .operator-move-exclusion td {{
+  border-bottom: 1px solid #d9e0ea;
+  font-size: 13px;
+  padding: 7px 6px;
+  text-align: right;
+}}
+.operator-move-exclusion th:first-child, .operator-move-exclusion td:first-child {{ text-align: left; }}
+@media (max-width: 900px) {{ .operator-move-exclusion-grid {{ grid-template-columns: 1fr; }} }}
+</style>
+<section class="operator-move-exclusion">
+  <h2>운영자 이동 의심 Segment 제외 기준</h2>
+  <p>
+    공유 PM의 강제 속도 한계 25km/h를 기준으로, 실제 이용자 주행보다는 관리업체의 차량 적재 재배치,
+    회수, 배터리 교환 과정으로 보이는 이동은 <code>excluded_from_demand=true</code>로 표시하고
+    수요 <code>D_i</code>, OD flow, 최적화 계산에서 제외합니다.
+  </p>
+  <div class="operator-move-exclusion-grid">
+    <div class="operator-move-exclusion-card">
+      <b>Rule-based 제외 조건</b>
+      <ul>
+        <li><code>speed_kmph &gt; 28</code>: PM 자체 주행으로 보기 어려운 고속 이동</li>
+        <li><code>speed_kmph &gt; 25</code>이고 같은 기기에서 30분 내 고속 이동 2회 이상 반복</li>
+        <li><code>speed_kmph &gt; 25</code>이고 같은 시간/OD에 2대 이상 함께 이동</li>
+        <li><code>speed_kmph &gt; 25</code>이고 배터리 변화량 절댓값이 20pp 이상</li>
+      </ul>
+    </div>
+    <div class="operator-move-exclusion-card">
+      <b>현재 집계</b>
+      <p>{html.escape(data_note)}</p>
+      <table>
+        <thead><tr><th>항목</th><th>건수</th></tr></thead>
+        <tbody>
+          <tr><td>Raw inferred rides</td><td>{summary['raw_segments']:,}</td></tr>
+          <tr><td>Clean demand rides</td><td>{summary['clean_segments']:,}</td></tr>
+          <tr><td>Excluded operator-move candidates</td><td>{summary['excluded_segments']:,}</td></tr>
+          <tr><td>Excluded devices</td><td>{summary['excluded_devices']:,}</td></tr>
+          <tr><td>Speed rule</td><td>{summary['speed_rule']:,}</td></tr>
+          <tr><td>Repeat rule</td><td>{summary['repeat_rule']:,}</td></tr>
+          <tr><td>Cluster rule</td><td>{summary['cluster_rule']:,}</td></tr>
+          <tr><td>Battery rule</td><td>{summary['battery_rule']:,}</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>
+"""
+
+
+def inject_html_before_body_end(path: Path, block: str) -> None:
+    html_text = path.read_text(encoding="utf-8")
+    if "</body>" in html_text:
+        html_text = html_text.replace("</body>", f"{block}\n</body>", 1)
+    elif "</html>" in html_text:
+        html_text = html_text.replace("</html>", f"{block}\n</html>", 1)
+    else:
+        html_text = f"{html_text}\n{block}"
+    path.write_text(html_text, encoding="utf-8")
+
+
 def render_chart_dashboard(
     tables: dict[str, pd.DataFrame],
     metrics: pd.DataFrame,
@@ -343,6 +480,10 @@ def render_chart_dashboard(
         make_model_scatter(metrics),
     )
     page.render(str(out_path))
+    inject_html_before_body_end(
+        out_path,
+        operator_move_exclusion_section(operator_move_exclusion_summary()),
+    )
 
 
 def load_geojson(path: Path | None) -> dict[str, Any]:

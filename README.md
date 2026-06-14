@@ -244,6 +244,7 @@ data/processed/sejong_tago/sejong_pm_zone_snapshot_counts.csv
 data/processed/sejong_tago/sejong_pm_device_intervals.csv
 data/processed/sejong_tago/sejong_pm_activity_by_zone.csv
 data/processed/sejong_tago/sejong_pm_inferred_rides.csv
+data/processed/sejong_tago/sejong_pm_operator_move_candidates.csv
 data/processed/sejong_tago/sejong_pm_od_flows.csv
 data/processed/sejong_tago/sejong_pm_preprocess_summary.json
 data/processed/sejong_tago/collector_runs.jsonl
@@ -256,8 +257,9 @@ data/processed/sejong_tago/collector_runs.jsonl
 | `sejong_pm_latest_snapshot.csv` | 최신 PM 위치와 operator supply |
 | `sejong_pm_zone_snapshot_counts.csv` | 시점별 zone/operator 공급량 |
 | `sejong_pm_device_intervals.csv` | 같은 device의 연속 snapshot 간 이동 |
-| `sejong_pm_inferred_rides.csv` | 4-6분, 100m 이상 이동 interval로 추정한 ride segment |
-| `sejong_pm_od_flows.csv` | inferred ride의 origin-destination flow |
+| `sejong_pm_inferred_rides.csv` | 4-6분, 100m 이상 이동 interval로 추정한 ride segment와 운영자 이동 의심 flag |
+| `sejong_pm_operator_move_candidates.csv` | 속도/반복/군집/배터리 rule로 제외된 운영자 이동 의심 segment |
+| `sejong_pm_od_flows.csv` | 운영자 이동 의심 segment를 제외한 clean inferred ride의 origin-destination flow |
 
 ---
 
@@ -280,6 +282,7 @@ outputs/visualizations/sejong_visualization_manifest.json
 - Solver에 넣는 model 식
 - decision variables와 constraints
 - static parameters와 data-derived parameters
+- 운영자 이동 의심 segment 제외 기준과 제외 건수
 - 최종 배치 결과 `x*`
 - zone별 배치 지도
 - non-linear demand capture 해설

@@ -22,8 +22,22 @@ OPERATOR_COLORS = {
 RIDE_INTERVAL_MINUTES = 5.0
 RIDE_INTERVAL_TOLERANCE_MINUTES = 1.0
 RIDE_DISTANCE_THRESHOLD_M = 100.0
+PM_SPEED_LIMIT_KMPH = 25.0
+OPERATOR_MOVE_SPEED_THRESHOLD_KMPH = 28.0
+OPERATOR_MOVE_REPEAT_WINDOW_MINUTES = 30.0
+OPERATOR_MOVE_REPEAT_MIN_FAST_SEGMENTS = 2
+OPERATOR_MOVE_CLUSTER_MIN_DEVICES = 2
+OPERATOR_MOVE_BATTERY_DELTA_ABS = 20.0
 MAX_OD_LINES = 120
 MAX_RIDE_SEGMENTS = 1000
+
+OPERATOR_MOVE_RULE_TEXT = (
+    f"Excluded from demand when speed > {OPERATOR_MOVE_SPEED_THRESHOLD_KMPH:.0f}km/h, "
+    f"or speed > {PM_SPEED_LIMIT_KMPH:.0f}km/h with repeated fast moves within "
+    f"{OPERATOR_MOVE_REPEAT_WINDOW_MINUTES:.0f}min, same OD/time cluster of "
+    f"{OPERATOR_MOVE_CLUSTER_MIN_DEVICES}+ devices, or battery delta >= "
+    f"{OPERATOR_MOVE_BATTERY_DELTA_ABS:.0f}pp."
+)
 
 
 def read_csv(path: Path) -> pd.DataFrame:
@@ -187,12 +201,66 @@ def make_battery_scatter(latest: pd.DataFrame) -> Scatter:
     )
 
 
+def summarize_operator_move_filter(segments: pd.DataFrame) -> dict[str, Any]:
+    if segments.empty:
+        return {
+            "total_segments": 0,
+            "demand_segments": 0,
+            "excluded_segments": 0,
+            "excluded_devices": 0,
+            "speed_rule_segments": 0,
+            "repeat_rule_segments": 0,
+            "cluster_rule_segments": 0,
+            "battery_rule_segments": 0,
+            "max_excluded_speed_kmph": 0.0,
+        }
+    rows = segments.copy()
+    excluded = rows.get("excluded_from_demand", False)
+    if not isinstance(excluded, pd.Series):
+        excluded = pd.Series(False, index=rows.index)
+    excluded = excluded.astype(bool)
+    speed = pd.to_numeric(rows.get("speed_kmph"), errors="coerce")
+    return {
+        "total_segments": int(len(rows)),
+        "demand_segments": int((~excluded).sum()),
+        "excluded_segments": int(excluded.sum()),
+        "excluded_devices": int(rows.loc[excluded, "device_id"].nunique()) if "device_id" in rows.columns else 0,
+        "speed_rule_segments": int(rows.get("operator_move_speed_rule", pd.Series(False, index=rows.index)).sum()),
+        "repeat_rule_segments": int(rows.get("operator_move_repeat_rule", pd.Series(False, index=rows.index)).sum()),
+        "cluster_rule_segments": int(rows.get("operator_move_cluster_rule", pd.Series(False, index=rows.index)).sum()),
+        "battery_rule_segments": int(rows.get("operator_move_battery_rule", pd.Series(False, index=rows.index)).sum()),
+        "max_excluded_speed_kmph": float(speed[excluded].max()) if excluded.any() else 0.0,
+    }
+
+
+def make_operator_move_filter_bar(segments: pd.DataFrame) -> Bar:
+    summary = summarize_operator_move_filter(segments)
+    chart = (
+        Bar(init_opts=chart_init("Operator Move Filter"))
+        .add_xaxis(["Demand rides", "Excluded operator-move candidates"])
+        .add_yaxis(
+            "Segments",
+            [summary["demand_segments"], summary["excluded_segments"]],
+            color="#0f766e",
+        )
+    )
+    return chart.set_global_opts(
+        title_opts=opts.TitleOpts(
+            title="Rule-based operator movement filter",
+            subtitle=OPERATOR_MOVE_RULE_TEXT,
+        ),
+        tooltip_opts=opts.TooltipOpts(trigger="axis", axis_pointer_type="shadow"),
+        yaxis_opts=opts.AxisOpts(name="Ride segments"),
+    )
+
+
 def render_chart_dashboard(tables: dict[str, pd.DataFrame], out_path: Path) -> None:
     page = Page(layout=Page.SimplePageLayout, page_title="Sejong TAGO PM Dashboard")
     page.add(
         make_latest_operator_bar(tables["latest"]),
         make_operator_trend(tables["operator_counts"]),
         make_activity_trend(tables["device_intervals"]),
+        make_operator_move_filter_bar(tables.get("ride_segments", pd.DataFrame())),
         make_battery_scatter(tables["latest"]),
     )
     page.render(str(out_path))
@@ -356,7 +424,83 @@ def ride_segment_candidates(intervals: pd.DataFrame) -> pd.DataFrame:
         return segments
     segments = segments.sort_values(["timestamp", "operator_name", "device_id"]).reset_index(drop=True)
     segments.insert(0, "ride_segment_id", segments.index + 1)
+    segments = add_operator_move_flags(segments)
     return segments
+
+
+def _fast_repeat_flags(rows: pd.DataFrame, fast_mask: pd.Series) -> pd.Series:
+    flags = pd.Series(False, index=rows.index)
+    if rows.empty or not fast_mask.any():
+        return flags
+    parsed_ts = pd.to_datetime(rows["timestamp"], errors="coerce")
+    window = pd.Timedelta(minutes=OPERATOR_MOVE_REPEAT_WINDOW_MINUTES)
+    working = rows.loc[fast_mask, ["operator_name", "device_id"]].copy()
+    working["_timestamp"] = parsed_ts.loc[fast_mask]
+    working = working.dropna(subset=["_timestamp"])
+    for _key, group in working.groupby(["operator_name", "device_id"], dropna=False):
+        if len(group) < OPERATOR_MOVE_REPEAT_MIN_FAST_SEGMENTS:
+            continue
+        times = group["_timestamp"].sort_values()
+        nanos = times.astype("int64").to_numpy()
+        span = int(window.value)
+        left = pd.Series(nanos).searchsorted(nanos - span, side="left")
+        right = pd.Series(nanos).searchsorted(nanos + span, side="right")
+        repeated = (right - left) >= OPERATOR_MOVE_REPEAT_MIN_FAST_SEGMENTS
+        flags.loc[times.index[repeated]] = True
+    return flags
+
+
+def add_operator_move_flags(segments: pd.DataFrame) -> pd.DataFrame:
+    if segments.empty:
+        return segments
+    rows = segments.copy()
+    speed = pd.to_numeric(rows.get("speed_kmph"), errors="coerce").fillna(0.0)
+    battery_delta = pd.to_numeric(rows.get("battery_delta"), errors="coerce")
+    fast_mask = speed > PM_SPEED_LIMIT_KMPH
+
+    rows["operator_move_speed_rule"] = speed > OPERATOR_MOVE_SPEED_THRESHOLD_KMPH
+    rows["operator_move_repeat_rule"] = _fast_repeat_flags(rows, fast_mask)
+
+    cluster_keys = ["prev_timestamp", "timestamp", "operator_name", "prev_zone_id", "zone_id"]
+    if set(cluster_keys).issubset(rows.columns):
+        cluster_sizes = rows.groupby(cluster_keys, dropna=False)["device_id"].transform("nunique")
+        rows["operator_move_cluster_rule"] = fast_mask & (cluster_sizes >= OPERATOR_MOVE_CLUSTER_MIN_DEVICES)
+    else:
+        rows["operator_move_cluster_rule"] = False
+
+    rows["operator_move_battery_rule"] = fast_mask & (battery_delta.abs() >= OPERATOR_MOVE_BATTERY_DELTA_ABS)
+    rule_columns = [
+        "operator_move_speed_rule",
+        "operator_move_repeat_rule",
+        "operator_move_cluster_rule",
+        "operator_move_battery_rule",
+    ]
+    rows["operator_move_flag"] = rows[rule_columns].any(axis=1)
+    rows["excluded_from_demand"] = rows["operator_move_flag"]
+
+    reason_map = [
+        ("operator_move_speed_rule", f"speed_gt_{OPERATOR_MOVE_SPEED_THRESHOLD_KMPH:.0f}kmh"),
+        ("operator_move_repeat_rule", f"repeat_fast_within_{OPERATOR_MOVE_REPEAT_WINDOW_MINUTES:.0f}min"),
+        ("operator_move_cluster_rule", f"same_od_time_cluster_{OPERATOR_MOVE_CLUSTER_MIN_DEVICES}plus"),
+        ("operator_move_battery_rule", f"fast_battery_delta_abs_ge_{OPERATOR_MOVE_BATTERY_DELTA_ABS:.0f}pp"),
+    ]
+    reasons = []
+    for row in rows.itertuples(index=False):
+        values = []
+        for column, label in reason_map:
+            if bool(getattr(row, column, False)):
+                values.append(label)
+        reasons.append("|".join(values))
+    rows["operator_move_reason"] = reasons
+    return rows
+
+
+def demand_ride_segments(segments: pd.DataFrame) -> pd.DataFrame:
+    if segments.empty:
+        return segments
+    if "excluded_from_demand" not in segments.columns:
+        return segments
+    return segments[~segments["excluded_from_demand"].astype(bool)].copy()
 
 
 def build_od_flows(segments: pd.DataFrame) -> pd.DataFrame:
@@ -387,9 +531,12 @@ def build_od_flows(segments: pd.DataFrame) -> pd.DataFrame:
 def write_ride_outputs(processed_dir: Path, segments: pd.DataFrame, od_flows: pd.DataFrame) -> dict[str, str]:
     paths = {
         "ride_segments": processed_dir / "sejong_pm_inferred_rides.csv",
+        "operator_move_candidates": processed_dir / "sejong_pm_operator_move_candidates.csv",
         "od_flows": processed_dir / "sejong_pm_od_flows.csv",
     }
     segments.to_csv(paths["ride_segments"], index=False)
+    demand_excluded = segments.get("excluded_from_demand", pd.Series(False, index=segments.index)).astype(bool)
+    segments[demand_excluded].to_csv(paths["operator_move_candidates"], index=False)
     od_flows.to_csv(paths["od_flows"], index=False)
     return {name: str(path) for name, path in paths.items()}
 
@@ -398,6 +545,9 @@ def summarize_ride_segments(segments: pd.DataFrame, od_flows: pd.DataFrame) -> d
     if segments.empty:
         return {
             "ride_segments": 0,
+            "demand_ride_segments": 0,
+            "excluded_operator_move_segments": 0,
+            "excluded_operator_move_devices": 0,
             "ride_devices": 0,
             "ride_operators": 0,
             "avg_distance_m": 0.0,
@@ -407,19 +557,28 @@ def summarize_ride_segments(segments: pd.DataFrame, od_flows: pd.DataFrame) -> d
             "first_timestamp": None,
             "last_timestamp": None,
             "od_pairs": 0,
+            **summarize_operator_move_filter(segments),
         }
     speed = pd.to_numeric(segments.get("speed_kmph"), errors="coerce")
+    filter_summary = summarize_operator_move_filter(segments)
+    demand_segments = demand_ride_segments(segments)
     return {
         "ride_segments": int(len(segments)),
+        "demand_ride_segments": int(len(demand_segments)),
+        "excluded_operator_move_segments": int(filter_summary["excluded_segments"]),
+        "excluded_operator_move_devices": int(filter_summary["excluded_devices"]),
         "ride_devices": int(segments["device_id"].nunique()),
         "ride_operators": int(segments["operator_name"].nunique()),
-        "avg_distance_m": float(segments["distance_m"].mean()),
-        "median_distance_m": float(segments["distance_m"].median()),
+        "avg_distance_m": float(demand_segments["distance_m"].mean()) if not demand_segments.empty else 0.0,
+        "median_distance_m": float(demand_segments["distance_m"].median()) if not demand_segments.empty else 0.0,
         "max_distance_m": float(segments["distance_m"].max()),
-        "avg_speed_kmph": float(speed.mean()) if speed.notna().any() else 0.0,
+        "avg_speed_kmph": float(pd.to_numeric(demand_segments.get("speed_kmph"), errors="coerce").mean())
+        if not demand_segments.empty
+        else 0.0,
         "first_timestamp": str(segments["timestamp"].min()),
         "last_timestamp": str(segments["timestamp"].max()),
         "od_pairs": int(len(od_flows)),
+        **filter_summary,
     }
 
 
@@ -442,8 +601,11 @@ def add_ride_summary_panel(m: folium.Map, summary: dict[str, Any], rendered_segm
     ">
       <div style="font-size: 14px; font-weight: 700; margin-bottom: 6px;">Sejong inferred ride movement</div>
       <div style="font-size: 12px;">Rule: {RIDE_INTERVAL_MINUTES:.0f}min +/- {RIDE_INTERVAL_TOLERANCE_MINUTES:.0f}min, distance >= {RIDE_DISTANCE_THRESHOLD_M:.0f}m</div>
+      <div style="font-size: 12px; margin-top: 4px; color:#475569;">Operator filter: {html.escape(OPERATOR_MOVE_RULE_TEXT)}</div>
       <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 4px 10px; margin-top: 8px; font-size: 12px;">
-        <span>total segments</span><b>{summary['ride_segments']:,}</b>
+        <span>raw segments</span><b>{summary['ride_segments']:,}</b>
+        <span>demand segments</span><b>{summary['demand_ride_segments']:,}</b>
+        <span>excluded ops</span><b>{summary['excluded_operator_move_segments']:,}</b>
         <span>rendered samples</span><b>{rendered_segments:,}</b>
         <span>devices</span><b>{summary['ride_devices']:,}</b>
         <span>OD pairs</span><b>{summary['od_pairs']:,}</b>
@@ -467,7 +629,10 @@ def add_ride_segments(
     max_ride_segments = max(0, int(max_ride_segments))
     max_od_lines = max(0, int(max_od_lines))
     summary = summarize_ride_segments(segments, od_flows)
-    sampled_segments = segments.sort_values("distance_m", ascending=False).head(max_ride_segments)
+    clean_segments = demand_ride_segments(segments)
+    excluded_segments = segments[segments.get("excluded_from_demand", pd.Series(False, index=segments.index)).astype(bool)]
+    sampled_segments = clean_segments.sort_values("distance_m", ascending=False).head(max_ride_segments)
+    sampled_operator_moves = excluded_segments.sort_values("speed_kmph", ascending=False).head(max_ride_segments)
     rendered_od = od_flows.head(max_od_lines)
     add_ride_summary_panel(m, summary, len(sampled_segments), len(rendered_od))
 
@@ -508,9 +673,40 @@ def add_ride_segments(
                 popup=folium.Popup(popup, max_width=320),
             ).add_to(od_layer)
 
+    if not sampled_operator_moves.empty:
+        ops_layer = folium.FeatureGroup(
+            name=f"Excluded operator-move candidates ({len(sampled_operator_moves):,}/{len(excluded_segments):,})",
+            show=False,
+        ).add_to(m)
+        for row in sampled_operator_moves.itertuples():
+            distance_m = float(getattr(row, "distance_m", 0.0))
+            speed_kmph = pd.to_numeric(getattr(row, "speed_kmph", None), errors="coerce")
+            speed_text = "n/a" if pd.isna(speed_kmph) else f"{float(speed_kmph):.1f}km/h"
+            popup = (
+                f"<b>Excluded operator-move candidate</b><br>"
+                f"operator={html.escape(str(getattr(row, 'operator_name', 'UNKNOWN')))}<br>"
+                f"device={html.escape(str(getattr(row, 'device_id', '')))}<br>"
+                f"from={html.escape(str(getattr(row, 'prev_timestamp', '')))}<br>"
+                f"to={html.escape(str(getattr(row, 'timestamp', '')))}<br>"
+                f"distance={distance_m:.0f}m<br>"
+                f"speed={speed_text}<br>"
+                f"reason={html.escape(str(getattr(row, 'operator_move_reason', '')))}"
+            )
+            folium.PolyLine(
+                locations=[
+                    [float(row.prev_latitude), float(row.prev_longitude)],
+                    [float(row.latitude), float(row.longitude)],
+                ],
+                color="#b45309",
+                weight=max(1.8, min(5.5, distance_m / 1000.0)),
+                opacity=0.62,
+                popup=folium.Popup(popup, max_width=360),
+                tooltip=f"excluded: {speed_text}",
+            ).add_to(ops_layer)
+
     if not sampled_segments.empty:
         raw_layer = folium.FeatureGroup(
-            name=f"Sampled ride segments ({len(sampled_segments):,}/{len(segments):,})",
+            name=f"Sampled demand ride segments ({len(sampled_segments):,}/{len(clean_segments):,})",
             show=False,
         ).add_to(m)
         for row in sampled_segments.itertuples():
@@ -542,6 +738,7 @@ def add_ride_segments(
                 tooltip=f"{operator_name}: {distance_m:.0f}m",
             ).add_to(raw_layer)
     summary["rendered_ride_segments"] = int(len(sampled_segments))
+    summary["rendered_operator_move_candidates"] = int(len(sampled_operator_moves))
     summary["rendered_od_flows"] = int(len(rendered_od))
     summary["max_ride_segments"] = int(max_ride_segments)
     summary["max_od_lines"] = int(max_od_lines)
@@ -593,7 +790,7 @@ def render(
     out_dir = ensure_dir(out_dir)
     tables = load_processed(processed_dir)
     ride_segments = ride_segment_candidates(tables["device_intervals"])
-    od_flows = build_od_flows(ride_segments)
+    od_flows = build_od_flows(demand_ride_segments(ride_segments))
     ride_output_paths = write_ride_outputs(processed_dir, ride_segments, od_flows)
     tables["ride_segments"] = ride_segments
     tables["od_flows"] = od_flows
