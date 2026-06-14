@@ -12,24 +12,24 @@
     "max_od_lines": 120
   },
   "map_result": {
-    "latest_rows": 4171,
-    "zone_markers": 370,
+    "latest_rows": 4172,
+    "zone_markers": 369,
     "device_markers": 1500,
     "center": [
-      36.494073,
-      127.283733
+      36.494758000000004,
+      127.2837755
     ],
     "ride_summary": {
-      "ride_segments": 6851,
-      "ride_devices": 1867,
+      "ride_segments": 8376,
+      "ride_devices": 1967,
       "ride_operators": 1,
-      "avg_distance_m": 1033.1027152450329,
-      "median_distance_m": 824.4662225885913,
+      "avg_distance_m": 1038.626065579952,
+      "median_distance_m": 827.4038070074588,
       "max_distance_m": 13908.950499166896,
-      "avg_speed_kmph": 12.399085826469044,
+      "avg_speed_kmph": 12.46608209600197,
       "first_timestamp": "2026-06-12T15:40:10+0900",
-      "last_timestamp": "2026-06-14T00:10:14+0900",
-      "od_pairs": 2205,
+      "last_timestamp": "2026-06-14T14:00:11+0900",
+      "od_pairs": 2455,
       "rendered_ride_segments": 1000,
       "rendered_od_flows": 120,
       "max_ride_segments": 1000,
@@ -38,7 +38,7 @@
   },
   "tables": {
     "accumulated": {
-      "rows": 1642786,
+      "rows": 2335276,
       "columns": [
         "timestamp",
         "operator_name",
@@ -60,7 +60,7 @@
       ]
     },
     "latest": {
-      "rows": 4171,
+      "rows": 4172,
       "columns": [
         "timestamp",
         "operator_name",
@@ -82,7 +82,7 @@
       ]
     },
     "operator_counts": {
-      "rows": 789,
+      "rows": 1121,
       "columns": [
         "timestamp",
         "operator_name",
@@ -96,7 +96,7 @@
       ]
     },
     "zone_counts": {
-      "rows": 156288,
+      "rows": 221798,
       "columns": [
         "timestamp",
         "zone_id",
@@ -109,7 +109,7 @@
       ]
     },
     "device_intervals": {
-      "rows": 1638615,
+      "rows": 2331104,
       "columns": [
         "timestamp",
         "prev_timestamp",
@@ -133,7 +133,7 @@
       ]
     },
     "activity_by_zone": {
-      "rows": 155887,
+      "rows": 221400,
       "columns": [
         "timestamp",
         "zone_id",
@@ -148,7 +148,7 @@
       ]
     },
     "ride_segments": {
-      "rows": 6851,
+      "rows": 8376,
       "columns": [
         "ride_segment_id",
         "timestamp",
@@ -173,7 +173,7 @@
       ]
     },
     "od_flows": {
-      "rows": 2205,
+      "rows": 2455,
       "columns": [
         "prev_zone_id",
         "zone_id",
