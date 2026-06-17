@@ -195,7 +195,7 @@ Optimization은 특정 parameter와 demand assumption 아래에서 `x*`를 찾�
 1. clean inferred ride를 04:00 기준 operating day, 1시간대, Origin-Destination Pair로 집계한다.
 2. log(1 + count) = hour effect + Origin-Destination Pair effect 회귀를 추정한다.
 3. 관측 평균 빈도와 회귀 예측값을 섞어 시간대별 Origin-Destination Pair base rate λ_hat을 만든다.
-4. 하루 Origin-Destination Pair rate 총량이 optimization section의 기대 ride `sum_i Q_i(x_i*)`와 맞도록 calibration factor를 곱한다.
+4. 하루 Origin-Destination Pair rate는 관측 operating day의 평균 scale을 그대로 사용하며, optimization section의 기대 ride `sum_i Q_i(x_i*)`에 맞춰 확대하지 않는다.
 5. 시간 공통 shock와 origin별 shock를 섞어 correlated normal random value Z를 만든다.
 6. Excel NORM.INV와 같은 원리로 얻은 normal shock를 rate에 곱해 random Origin-Destination Pair demand를 생성한다.
 7. GCOO 초기 재고는 P*=x*, ALPACA 초기 재고는 latest snapshot 공급량으로 둔다.
@@ -203,7 +203,7 @@ Optimization은 특정 parameter와 demand assumption 아래에서 `x*`를 찾�
 9. demand가 있었지만 origin 재고가 부족한 경우 shortage log에 시간대, zone, 수요, 처리량, 부족량을 기록한다.
 ```
 
-따라서 `Simulated combined demand`는 특정 random day에서 실현된 수요이고, `Target Q(x*) rides`는 optimization model이 예측한 하루 기대 ride 총량입니다. 두 값은 Poisson/random shock 때문에 완전히 같지는 않지만, simulation의 기대 총량은 `sum_i Q_i(x_i*)`에 맞춰져 있습니다.
+따라서 `Simulated combined demand`는 특정 random day에서 실현된 관측-scale 수요이고, `Model Q(x*) rides`는 optimization model이 예측한 하루 기대 ride 총량입니다. 두 값은 서로 다른 기준입니다. temporal simulation은 검증용이므로 관측 OD flow를 `sum_i Q_i(x_i*)`에 맞춰 강제로 스케일하지 않습니다.
 
 재고 전이는 다음처럼 읽을 수 있습니다.
 

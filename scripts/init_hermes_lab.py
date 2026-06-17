@@ -143,11 +143,16 @@ def init_git() -> None:
         run(["git", "commit", "-m", "Initialize agent lab workspace"], cwd=LAB_ROOT)
 
 
-def init_lab(force: bool = False, quick: bool = False) -> None:
+def init_lab(
+    force: bool = False,
+    quick: bool = True,
+    sync_data: bool = True,
+    refresh_code: bool = False,
+) -> None:
     if force and LAB_ROOT.exists():
         shutil.rmtree(LAB_ROOT)
     LAB_ROOT.mkdir(parents=True, exist_ok=True)
-    refresh_existing = not quick
+    refresh_existing = force or refresh_code
 
     for src_rel, dst_rel in DIRECTORY_CLONES:
         copy_tree(REPO_ROOT / src_rel, LAB_ROOT / dst_rel, overwrite=refresh_existing)
@@ -157,7 +162,7 @@ def init_lab(force: bool = False, quick: bool = False) -> None:
     for filename in LAB_PROCESSED_FILES:
         src = REPO_ROOT / "data" / "processed" / "sejong_tago" / filename
         if src.exists():
-            copy_file(src, processed_dst / filename, overwrite=refresh_existing)
+            copy_file(src, processed_dst / filename, overwrite=sync_data or refresh_existing)
 
     for filename in ROOT_FILES:
         src = REPO_ROOT / filename
@@ -182,9 +187,24 @@ def init_lab(force: bool = False, quick: bool = False) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(description="Initialize the Hermes experiment lab workspace.")
     parser.add_argument("--force", action="store_true", help="Recreate the lab workspace.")
-    parser.add_argument("--quick", action="store_true", help="Skip expensive work when the lab already exists.")
+    parser.add_argument("--quick", action="store_true", help="Compatibility flag; existing lab code/assets are preserved by default.")
+    parser.add_argument(
+        "--refresh-code",
+        action="store_true",
+        help="Overwrite lab model code, config, docs, and visualization assets from the original workspace.",
+    )
+    parser.add_argument(
+        "--no-sync-data",
+        action="store_true",
+        help="Do not refresh raw-derived processed input files from the original workspace.",
+    )
     args = parser.parse_args()
-    init_lab(force=args.force, quick=args.quick)
+    init_lab(
+        force=args.force,
+        quick=True,
+        sync_data=not args.no_sync_data,
+        refresh_code=args.refresh_code,
+    )
     print(LAB_ROOT)
 
 

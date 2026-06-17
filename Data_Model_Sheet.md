@@ -619,21 +619,9 @@ y_{d,h,o,r}
 
 현재 dashboard에서는 `w = 0.35`를 사용한다.
 
-이때 위 식의 `\hat{\lambda}_{h,o,r}`는 Origin-Destination Pair의 시간대별 상대 패턴을 설명하는 base rate다. Simulation은 `P*`의 사후 검증이므로, 하루 총 수요 규모는 main optimization section의 기대 ride와 같은 기준으로 맞춘다.
+이때 위 식의 `\hat{\lambda}_{h,o,r}`는 Origin-Destination Pair의 시간대별 패턴과 하루 평균 규모를 함께 설명하는 base rate다. Simulation은 `P*`의 사후 검증이므로, 관측 OD flow를 main optimization section의 기대 ride `sum_i Q_i(x_i*)`에 맞춰 강제로 확대하지 않는다.
 
-```math
-c_Q
-=
-\frac{\sum_i Q_i(x_i^*)}
-{\sum_{h,o,r}\hat{\lambda}_{h,o,r}}
-```
-
-```math
-\lambda^{cal}_{h,o,r}
-=c_Q\hat{\lambda}_{h,o,r}
-```
-
-즉, Origin-Destination Pair flow의 방향과 시간대별 shape는 관측 inferred ride에서 오고, 하루 총량은 `sum_i Q_i(x_i*)`에 맞춘다. 따라서 dashboard의 `Target Q(x*) rides`는 optimization model의 기대 ride이고, `Simulated combined demand`는 correlated shock와 Poisson draw를 거친 특정 synthetic day의 실현 demand다. 두 값은 random draw 때문에 완전히 같지는 않지만, simulation의 기대 총량은 `Target Q(x*) rides`와 일치한다.
+즉, Origin-Destination Pair flow의 방향, 시간대별 shape, 하루 demand scale은 관측 inferred ride의 operating-day 평균에서 온다. Dashboard의 `Model Q(x*) rides`는 optimization model의 기대 ride이고, `Simulated combined demand`는 correlated shock와 Poisson draw를 거친 특정 synthetic day의 관측-scale 실현 demand다. 두 값은 서로 다른 기준이므로 일치하도록 보정하지 않는다.
 
 ### 10.3 Correlated Random Value 생성
 
@@ -651,7 +639,7 @@ Z_{h,o,r}
 
 ```math
 \lambda'_{h,o,r}
-=\lambda^{cal}_{h,o,r}
+=\hat{\lambda}_{h,o,r}
 \cdot
 \exp\left(\sigma Z_{h,o,r}-\frac{1}{2}\sigma^2\right)
 ```
@@ -828,18 +816,18 @@ Full-run 완료 후 `이 최적값 반영하기` 버튼을 누르면 best `λ/β
 
 | 항목 | 값 |
 | --- | ---: |
-| dashboard latest timestamp | 2026-06-18T04:25:03+0900 |
-| model zones | 356 |
+| dashboard latest timestamp | 2026-06-18T05:10:20+0900 |
+| model zones | 357 |
 | GBIKE devices in snapshot | 2,823 |
 | ALPACA devices in snapshot | 1,368 |
 | optimization fleet `F` | 2,800 |
 | allocated devices | 2,800 |
 | active zones | 108 |
-| expected rides | 13,263.6 |
-| expected revenue | 29,179,830 KRW |
-| expected variable cost | 3,979,068 KRW |
-| expected rebalancing cost | 377,556 KRW |
-| expected profit / Objective value | 24,823,206 KRW |
+| expected rides | 13,270.0 |
+| expected revenue | 29,194,091 KRW |
+| expected variable cost | 3,981,012 KRW |
+| expected rebalancing cost | 377,338 KRW |
+| expected profit / Objective value | 24,835,740 KRW |
 
 Origin-Destination Pair 기반 하루 재고 simulation의 현재 결과는 다음과 같다.
 
@@ -847,16 +835,17 @@ Origin-Destination Pair 기반 하루 재고 simulation의 현재 결과는 다�
 | --- | ---: |
 | initial GCOO `P*` supply | 2,800 |
 | initial ALPACA latest supply | 1,368 |
-| target `Q(x*)` rides | 3,695.9 |
-| modeled Origin-Destination Pairs | 3,221 |
-| demand calibration factor | 1.16 |
-| simulated combined demand | 3,711 |
-| served rides | 2,969 |
-| unmet rides | 742 |
-| service rate | 80.0% |
-| shortage zones | 73 |
-| shortage events | 301 |
-| peak shortage hour | 16:00-17:00 |
+| model `Q(x*)` rides | 13,270.0 |
+| modeled Origin-Destination Pairs | 3,225 |
+| OD rate scale | 1.00 |
+| disabled target-match factor | 4.88 |
+| simulated combined demand | 2,748 |
+| served rides | 2,696 |
+| unmet rides | 52 |
+| service rate | 98.1% |
+| shortage zones | 36 |
+| shortage events | 49 |
+| peak shortage hour | 15:00-16:00 |
 
 전처리 최신 시각과 dashboard run 시각이 다를 수 있다. 이는 데이터 수집이 계속 진행되는 동안 visualization이 특정 snapshot 기준으로 생성되기 때문이다. 보고서에는 반드시 "전처리 최신 데이터 기준"과 "dashboard run 기준"을 구분해서 적는 것이 좋다.
 

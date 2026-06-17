@@ -382,6 +382,28 @@
     return event;
   }
 
+  async function readSseResponse(response, onEvent) {
+    if (!response.ok || !response.body) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    while (true) {
+      const chunk = await reader.read();
+      if (chunk.done) break;
+      buffer += decoder.decode(chunk.value, { stream: true });
+      const parsed = eventLines(buffer);
+      buffer = parsed.rest;
+      for (const event of parsed.events.map(parseSse)) {
+        if (onEvent(event) === false) {
+          await reader.cancel().catch(() => {});
+          return;
+        }
+      }
+    }
+  }
+
   async function streamChat(message, log, sendButton, input, status) {
     appendMessage(log, "user", message);
     const assistant = appendMessage(log, "assistant", "");
@@ -400,12 +422,6 @@
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ message, mode, sessionId, page: window.location.pathname }),
       });
-      if (!response.ok || !response.body) {
-        throw new Error(`HTTP ${response.status}`);
-      }
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = "";
 
       function showAssistantStatus(text) {
         if (assistantHasAnswer) return;
@@ -426,50 +442,44 @@
         log.scrollTop = log.scrollHeight;
       }
 
-      while (true) {
-        const chunk = await reader.read();
-        if (chunk.done) break;
-        buffer += decoder.decode(chunk.value, { stream: true });
-        const parsed = eventLines(buffer);
-        buffer = parsed.rest;
-        parsed.events.map(parseSse).forEach((event) => {
-          if (event.type === "delta") {
-            appendAssistantDelta(event.json.text || "");
-          } else if (event.type === "status") {
-            status.textContent = event.json.text || "처리 중";
-            showAssistantStatus(event.json.text || "처리 중");
-          } else if (event.type === "error") {
+      await readSseResponse(response, (event) => {
+        if (event.type === "delta") {
+          appendAssistantDelta(event.json.text || "");
+        } else if (event.type === "status") {
+          status.textContent = event.json.text || "처리 중";
+          showAssistantStatus(event.json.text || "처리 중");
+        } else if (event.type === "error") {
+          clearWorkingState(assistant);
+          assistant.classList.add("error");
+          assistant.textContent = event.json.text || "에이전트 연결 오류";
+          assistantHasAnswer = true;
+          assistantText = "";
+          finished = true;
+        } else if (event.type === "done") {
+          const finalText = event.json.text || "";
+          if (finalText) {
+            assistantText = finalText;
+            setMessageContent(assistant, "assistant", assistantText);
+            assistantHasAnswer = true;
+          } else if (!assistantHasAnswer || assistant.dataset.placeholder === "status") {
             clearWorkingState(assistant);
             assistant.classList.add("error");
-            assistant.textContent = event.json.text || "에이전트 연결 오류";
+            assistant.textContent = "응답이 비어 있습니다";
             assistantHasAnswer = true;
-            assistantText = "";
-          } else if (event.type === "done") {
-            const finalText = event.json.text || "";
-            if (finalText) {
-              assistantText = finalText;
-              setMessageContent(assistant, "assistant", assistantText);
-              assistantHasAnswer = true;
-            } else if (!assistantHasAnswer || assistant.dataset.placeholder === "status") {
-              clearWorkingState(assistant);
-              assistant.classList.add("error");
-              assistant.textContent = "응답이 비어 있습니다";
-              assistantHasAnswer = true;
-            }
-            if (event.json.sessionId) setCurrentSessionId(event.json.sessionId);
-            status.textContent = "연결됨";
-            finished = true;
-            if (isLab) {
-              window.dispatchEvent(new CustomEvent("hermes-lab-refresh-needed"));
-              window.dispatchEvent(new CustomEvent("hermes-lab-saves-refresh-needed"));
-            }
           }
-        });
-        if (finished) {
-          await reader.cancel().catch(() => {});
-          break;
+          if (event.json.sessionId) setCurrentSessionId(event.json.sessionId);
+          status.textContent = "연결됨";
+          finished = true;
+          if (isLab) {
+            window.dispatchEvent(new CustomEvent("hermes-lab-refresh-needed"));
+            window.dispatchEvent(new CustomEvent("hermes-lab-saves-refresh-needed"));
+          }
         }
-      }
+        if (finished) {
+          return false;
+        }
+        return true;
+      });
     } catch (error) {
       clearWorkingState(assistant);
       assistant.classList.add("error");
@@ -480,6 +490,66 @@
       if (assistantHasAnswer && !assistant.classList.contains("error") && status.textContent !== "연결됨") {
         status.textContent = "연결됨";
       }
+      sendButton.disabled = false;
+      input.focus();
+    }
+  }
+
+  async function resumeActiveStream(active, log, sendButton, input, status, assistant) {
+    if (!active || !active.running || !active.sessionId) return;
+    const bubble = assistant || appendMessage(log, "assistant", "");
+    let assistantText = bubble.dataset.placeholder === "status" ? "" : (bubble.dataset.rawText || "");
+    let assistantHasAnswer = Boolean(assistantText);
+    let finished = false;
+    if (assistantText) {
+      setMessageContent(bubble, "assistant", assistantText);
+    } else {
+      setAssistantWorking(bubble, active.statusText || "작업 계속 진행 중");
+    }
+    sendButton.disabled = true;
+    status.textContent = active.statusText || "작업 계속 진행 중";
+    try {
+      const query = new URLSearchParams({
+        mode,
+        sessionId: active.sessionId,
+        from: String(active.eventIndex || 0),
+      });
+      const response = await fetch(`${bridgeUrl}/api/chat/stream?${query.toString()}`);
+      await readSseResponse(response, (event) => {
+        if (event.type === "delta") {
+          const text = event.json.text || "";
+          if (text) {
+            assistantText += text;
+            assistantHasAnswer = true;
+            setMessageContent(bubble, "assistant", assistantText);
+            log.scrollTop = log.scrollHeight;
+          }
+        } else if (event.type === "status") {
+          status.textContent = event.json.text || "작업 계속 진행 중";
+          if (!assistantHasAnswer) setAssistantWorking(bubble, event.json.text || "작업 계속 진행 중");
+        } else if (event.type === "error") {
+          clearWorkingState(bubble);
+          bubble.classList.add("error");
+          bubble.textContent = event.json.text || "에이전트 연결 오류";
+          finished = true;
+        } else if (event.type === "done") {
+          const finalText = event.json.text || assistantText;
+          if (finalText) setMessageContent(bubble, "assistant", finalText);
+          if (event.json.sessionId) setCurrentSessionId(event.json.sessionId);
+          status.textContent = "연결됨";
+          finished = true;
+          if (isLab) {
+            window.dispatchEvent(new CustomEvent("hermes-lab-refresh-needed"));
+            window.dispatchEvent(new CustomEvent("hermes-lab-saves-refresh-needed"));
+          }
+        }
+        return !finished;
+      });
+    } catch (_error) {
+      if (!assistantHasAnswer) setAssistantWorking(bubble, "작업 상태 확인 중");
+      status.textContent = "작업 확인 중";
+    } finally {
+      if (finished) status.textContent = "연결됨";
       sendButton.disabled = false;
       input.focus();
     }
@@ -716,8 +786,20 @@
         log.innerHTML = "";
         (payload.messages || []).forEach((message) => appendMessage(log, message.role, message.content));
         if (!(payload.messages || []).length && !opts.silent) appendMessage(log, "system", "복원됨");
+        if (payload.active && payload.active.running) {
+          let assistant = null;
+          if (payload.active.partialText) {
+            assistant = appendMessage(log, "assistant", payload.active.partialText);
+          } else {
+            assistant = appendMessage(log, "assistant", "");
+            setAssistantWorking(assistant, payload.active.statusText || "작업 계속 진행 중");
+          }
+          resumeActiveStream(payload.active, log, send, input, status, assistant);
+        }
         if (opts.closeList !== false) setSessionListOpen(false);
-        status.textContent = opts.silent ? "연결됨" : "복원됨";
+        if (!(payload.active && payload.active.running)) {
+          status.textContent = opts.silent ? "연결됨" : "복원됨";
+        }
         input.focus();
         return true;
       } catch (_error) {

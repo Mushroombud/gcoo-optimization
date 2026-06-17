@@ -4,7 +4,6 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import queue
 import re
 import shlex
 import subprocess
@@ -35,8 +34,12 @@ MEMORY_PATH = REPO_ROOT / "Memory.md"
 LAB_FORBIDDEN_RELATIVE_PREFIXES = (Path("data/raw"),)
 ORIGINAL_PROTECTED_PATHS = (
     RAW_DATA_ROOT,
+    REPO_ROOT / "config",
     REPO_ROOT / "src",
     REPO_ROOT / "scripts",
+    REPO_ROOT / "outputs" / "model",
+    REPO_ROOT / "outputs" / "prototype",
+    VISUALIZATION_ROOT,
     VISUALIZATION_ROOT / "optimization_model.html",
     VISUALIZATION_ROOT / "optimization_model_map.html",
     VISUALIZATION_ROOT / "optimization_model_data.json",
@@ -83,6 +86,8 @@ Your writable workspace is {LAB_ROOT}.
 The lab is an isolated clone of the optimization model page, model code, configuration, model outputs, visualization assets, and processed back data.
 Freely modify model assumptions, variables, visualization HTML, copied data, or copied Python code inside the lab workspace when the user asks.
 Do not modify files outside {LAB_ROOT}.
+Do not copy, refresh, or overwrite lab model code, config, docs, or visualization files from the original workspace.
+The original raw data is the only upstream source that may be inspected; model and visualization experiments must remain lab-local.
 You may read original raw data under {RAW_DATA_ROOT} to inspect columns and data types, but never modify it.
 When you change a visualization, update the lab files so the iframe page can refresh immediately.
 Prefer direct, visible changes over long explanations.
@@ -100,12 +105,29 @@ class AgentSession:
     lock: threading.Lock = field(default_factory=threading.Lock)
 
 
+@dataclass
+class ActiveRun:
+    mode: str
+    db_session_id: str
+    client_session_id: str
+    user_message: str = ""
+    started_at: float = field(default_factory=time.time)
+    events: list[tuple[str, dict[str, Any]]] = field(default_factory=list)
+    partial_text: str = ""
+    status_text: str = "에이전트 준비 중"
+    done: bool = False
+    finished_at: float | None = None
+    condition: threading.Condition = field(default_factory=threading.Condition)
+
+
 SESSIONS: dict[tuple[str, str], AgentSession] = {}
 SESSIONS_LOCK = threading.Lock()
 SESSION_DB: Any | None = None
 SESSION_DB_LOCK = threading.Lock()
 SESSION_EVENT_SINKS: dict[str, Callable[[tuple[str, dict[str, Any]]], None]] = {}
 SESSION_EVENT_SINKS_LOCK = threading.Lock()
+ACTIVE_RUNS: dict[tuple[str, str], ActiveRun] = {}
+ACTIVE_RUNS_LOCK = threading.Lock()
 
 
 def emit_session_event(session_id: str, event: str, data: dict[str, Any]) -> None:
@@ -117,6 +139,64 @@ def emit_session_event(session_id: str, event: str, data: dict[str, Any]) -> Non
         sink((event, data))
     except Exception:
         pass
+
+
+def append_active_event(active: ActiveRun, event: str, data: dict[str, Any]) -> None:
+    payload = dict(data)
+    with active.condition:
+        if event == "delta":
+            active.partial_text += str(payload.get("text") or "")
+        elif event == "status":
+            active.status_text = str(payload.get("text") or active.status_text)
+        elif event == "done":
+            active.partial_text = str(payload.get("text") or active.partial_text)
+            active.done = True
+            active.finished_at = time.time()
+        elif event == "error":
+            active.status_text = str(payload.get("text") or "에이전트 오류")
+            active.done = True
+            active.finished_at = time.time()
+        active.events.append((event, payload))
+        active.condition.notify_all()
+
+
+def active_run_for(mode: str, session_id: str) -> ActiveRun | None:
+    db_session_id, _client_session_id = normalize_session_id(mode, session_id)
+    with ACTIVE_RUNS_LOCK:
+        active = ACTIVE_RUNS.get((mode, db_session_id))
+    if active and not active.done:
+        return active
+    return None
+
+
+def active_run_snapshot(mode: str, session_id: str) -> dict[str, Any] | None:
+    active = active_run_for(mode, session_id)
+    if active is None:
+        return None
+    with active.condition:
+        return {
+            "running": True,
+            "sessionId": active.db_session_id,
+            "clientSessionId": active.client_session_id,
+            "startedAt": active.started_at,
+            "eventIndex": len(active.events),
+            "partialText": active.partial_text,
+            "statusText": active.status_text,
+        }
+
+
+def get_or_start_active_run(mode: str, session_id: str, user_message: str = "") -> tuple[ActiveRun, bool]:
+    db_session_id, client_session_id = normalize_session_id(mode, session_id)
+    key = (mode, db_session_id)
+    with ACTIVE_RUNS_LOCK:
+        active = ACTIVE_RUNS.get(key)
+        if active and not active.done:
+            if user_message and not active.user_message:
+                active.user_message = user_message
+            return active, False
+        active = ActiveRun(mode=mode, db_session_id=db_session_id, client_session_id=client_session_id, user_message=user_message)
+        ACTIVE_RUNS[key] = active
+        return active, True
 
 
 def run(command: list[str], cwd: Path | None = None) -> subprocess.CompletedProcess[str]:
@@ -237,6 +317,8 @@ def terminal_command_guard(command: str, workdir: str | None) -> str | None:
     except ValueError:
         tokens = command_text.split()
     for token in tokens:
+        if token.startswith("~"):
+            return "실험실 명령에서는 홈 디렉터리 경로를 직접 사용할 수 없습니다"
         if token in {"..", "../"} or token.startswith("../") or "/../" in token:
             return "상위 폴더로 벗어나는 경로는 사용할 수 없습니다"
         if token.startswith("/"):
@@ -245,9 +327,7 @@ def terminal_command_guard(command: str, workdir: str | None) -> str | None:
             except OSError:
                 continue
             if not is_within(resolved, LAB_ROOT):
-                for protected in ORIGINAL_PROTECTED_PATHS:
-                    if resolved == protected.resolve() or protected.resolve() in resolved.parents:
-                        return f"원본 경로는 실험실 명령에서 수정할 수 없습니다: {resolved}"
+                return f"실험실 명령은 실험실 폴더 안의 경로만 사용할 수 있습니다: {resolved}"
     return None
 
 
@@ -570,6 +650,11 @@ def restore_agent_session(mode: str, db_session_id: str) -> AgentSession:
         db.reopen_session(db_session_id)
     except Exception:
         pass
+    with SESSIONS_LOCK:
+        existing = SESSIONS.get((mode, db_session_id))
+    if existing is not None:
+        existing.history = history
+        return existing
     session = make_agent_session(mode, client_session_id, history=history)
     with SESSIONS_LOCK:
         SESSIONS[(mode, db_session_id)] = session
@@ -771,9 +856,19 @@ class HermesBridgeHandler(SimpleHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def send_sse_headers(self) -> None:
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream; charset=utf-8")
+        self.send_header("Cache-Control", "no-cache")
+        self.send_header("Connection", "close")
+        self.end_headers()
+
     def do_GET(self) -> None:
         if self.path.startswith("/api/health"):
             self.send_json({"ok": True, "lab": LAB_ROOT.exists()})
+            return
+        if self.path.startswith("/api/chat/stream"):
+            self.handle_chat_stream()
             return
         if self.path.startswith("/api/sessions"):
             self.handle_sessions_list()
@@ -827,9 +922,26 @@ class HermesBridgeHandler(SimpleHTTPRequestHandler):
                     "sessionId": session.db_session_id,
                     "clientSessionId": session.session_id,
                     "messages": conversation_for_ui(session.history),
+                    "active": active_run_snapshot(mode, session.db_session_id),
                 }
             )
         except Exception as exc:
+            active = active_run_for(mode, session_id)
+            if active is not None:
+                messages = []
+                if active.user_message:
+                    messages.append({"role": "user", "content": active.user_message})
+                self.send_json(
+                    {
+                        "ok": True,
+                        "message": "작업 진행 중",
+                        "sessionId": active.db_session_id,
+                        "clientSessionId": active.client_session_id,
+                        "messages": messages,
+                        "active": active_run_snapshot(mode, active.db_session_id),
+                    }
+                )
+                return
             self.send_json({"error": str(exc)}, status=404)
 
     def handle_lab_init(self) -> None:
@@ -891,45 +1003,41 @@ class HermesBridgeHandler(SimpleHTTPRequestHandler):
             self.send_json({"error": "empty message"}, status=400)
             return
 
-        self.send_response(200)
-        self.send_header("Content-Type", "text/event-stream; charset=utf-8")
-        self.send_header("Cache-Control", "no-cache")
-        self.send_header("Connection", "close")
-        self.end_headers()
+        active, should_start = get_or_start_active_run(mode, session_id, user_message=message)
+        if should_start:
+            append_active_event(active, "status", {"text": "에이전트 준비 중"})
 
-        events: queue.Queue[tuple[str, dict[str, Any]] | None] = queue.Queue()
-        events.put(("status", {"text": "에이전트 준비 중"}))
+            def worker() -> None:
+                try:
+                    session = get_agent_session(mode, session_id)
+                    with session.lock:
+                        def sink(item: tuple[str, dict[str, Any]]) -> None:
+                            event, data = item
+                            append_active_event(active, event, data)
 
-        def worker() -> None:
-            try:
-                session = get_agent_session(mode, session_id)
-                with session.lock:
-                    def sink(item: tuple[str, dict[str, Any]]) -> None:
-                        events.put(item)
-
-                    with SESSION_EVENT_SINKS_LOCK:
-                        SESSION_EVENT_SINKS[session.db_session_id] = sink
-                    events.put(("status", {"text": "에이전트 연결"}))
-
-                    def on_delta(delta: str, **_kwargs: Any) -> None:
-                        if delta:
-                            events.put(("delta", {"text": delta}))
-
-                    try:
-                        result = session.agent.run_conversation(
-                            message,
-                            system_message=LAB_SYSTEM_PROMPT if mode == "lab" else READ_SYSTEM_PROMPT,
-                            conversation_history=session.history or None,
-                            task_id=session.agent.session_id,
-                            stream_callback=on_delta,
-                        )
-                    finally:
                         with SESSION_EVENT_SINKS_LOCK:
-                            if SESSION_EVENT_SINKS.get(session.db_session_id) is sink:
-                                del SESSION_EVENT_SINKS[session.db_session_id]
-                    session.history = result.get("messages") or session.history
-                    events.put(
-                        (
+                            SESSION_EVENT_SINKS[session.db_session_id] = sink
+                        append_active_event(active, "status", {"text": "에이전트 연결"})
+
+                        def on_delta(delta: str, **_kwargs: Any) -> None:
+                            if delta:
+                                append_active_event(active, "delta", {"text": delta})
+
+                        try:
+                            result = session.agent.run_conversation(
+                                message,
+                                system_message=LAB_SYSTEM_PROMPT if mode == "lab" else READ_SYSTEM_PROMPT,
+                                conversation_history=session.history or None,
+                                task_id=session.agent.session_id,
+                                stream_callback=on_delta,
+                            )
+                        finally:
+                            with SESSION_EVENT_SINKS_LOCK:
+                                if SESSION_EVENT_SINKS.get(session.db_session_id) is sink:
+                                    del SESSION_EVENT_SINKS[session.db_session_id]
+                        session.history = result.get("messages") or session.history
+                        append_active_event(
+                            active,
                             "done",
                             {
                                 "text": result.get("final_response") or "",
@@ -937,29 +1045,52 @@ class HermesBridgeHandler(SimpleHTTPRequestHandler):
                                 "clientSessionId": session.session_id,
                             },
                         )
-                    )
-            except Exception as exc:
-                events.put(("error", {"text": str(exc)}))
-            finally:
-                events.put(None)
+                except Exception as exc:
+                    append_active_event(active, "error", {"text": str(exc)})
 
-        threading.Thread(target=worker, daemon=True).start()
+            threading.Thread(target=worker, daemon=True).start()
+
+        self.stream_active_run(active, start_index=0)
+
+    def handle_chat_stream(self) -> None:
+        query = parse_qs(urlparse(self.path).query)
+        mode = "lab" if (query.get("mode") or ["read"])[0] == "lab" else "read"
+        session_id = (query.get("sessionId") or query.get("id") or [""])[0]
+        try:
+            start_index = max(int((query.get("from") or ["0"])[0]), 0)
+        except ValueError:
+            start_index = 0
+        active = active_run_for(mode, session_id)
+        if active is None:
+            self.send_json({"error": "active run not found"}, status=404)
+            return
+        self.stream_active_run(active, start_index=start_index)
+
+    def stream_active_run(self, active: ActiveRun, start_index: int = 0) -> None:
+        self.send_sse_headers()
         heartbeat_index = 0
         heartbeat_messages = ("작업 계속 진행 중", "도구 결과 확인 중", "답변 준비 중")
+        index = max(start_index, 0)
         while True:
-            try:
-                item = events.get(timeout=6)
-            except queue.Empty:
-                item = ("status", {"text": heartbeat_messages[heartbeat_index % len(heartbeat_messages)], "kind": "heartbeat"})
-                heartbeat_index += 1
-            if item is None:
-                break
-            event, data = item
-            try:
-                self.wfile.write(sse(event, data))
-                self.wfile.flush()
-            except BrokenPipeError:
-                break
+            with active.condition:
+                if index >= len(active.events) and not active.done:
+                    active.condition.wait(timeout=6)
+                if index < len(active.events):
+                    pending = active.events[index:]
+                    index = len(active.events)
+                elif active.done:
+                    break
+                else:
+                    pending = [("status", {"text": heartbeat_messages[heartbeat_index % len(heartbeat_messages)], "kind": "heartbeat"})]
+                    heartbeat_index += 1
+            for event, data in pending:
+                try:
+                    self.wfile.write(sse(event, data))
+                    self.wfile.flush()
+                except BrokenPipeError:
+                    return
+                if event in {"done", "error"}:
+                    return
 
 
 def main() -> None:

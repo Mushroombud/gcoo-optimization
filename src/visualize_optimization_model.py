@@ -866,14 +866,14 @@ def generate_temporal_demand_events(
         }
 
     uncalibrated_rate_total = float(rate_rows["blended_rate"].sum())
-    demand_calibration_factor = (
+    target_match_factor = (
         float(target_expected_rides) / uncalibrated_rate_total
         if target_expected_rides > 0.0 and uncalibrated_rate_total > 0.0
         else 1.0
     )
+    demand_calibration_factor = 1.0
     calibrated_rates = rate_rows.copy()
     calibrated_rates["base_blended_rate"] = calibrated_rates["blended_rate"]
-    calibrated_rates["blended_rate"] = calibrated_rates["blended_rate"] * demand_calibration_factor
 
     rng = np.random.default_rng(seed)
     simulated_demands: list[dict[str, Any]] = []
@@ -922,6 +922,7 @@ def generate_temporal_demand_events(
         "target_expected_rides": float(target_expected_rides),
         "uncalibrated_temporal_rate_total": uncalibrated_rate_total,
         "demand_calibration_factor": demand_calibration_factor,
+        "disabled_target_match_factor": target_match_factor,
         "simulated_demand": int(sum(item["demand"] for item in simulated_demands)),
     }
     return simulated_demands, meta
@@ -1168,7 +1169,8 @@ def build_temporal_inventory_simulation(rows: pd.DataFrame, processed_dir: Path)
         "target_expected_rides": target_expected_rides,
         "uncalibrated_temporal_rate_total": uncalibrated_rate_total,
         "demand_calibration_factor": demand_calibration_factor,
-        "calibration_note": "Blended hourly Origin-Destination Pair rates are scaled so the expected simulated day demand matches optimization expected rides sum_i Q_i(x_i*).",
+        "disabled_target_match_factor": float(demand_meta.get("disabled_target_match_factor", 1.0)),
+        "calibration_note": "Blended hourly Origin-Destination Pair rates use observed per-operating-day scale directly; they are not scaled to match optimization expected rides sum_i Q_i(x_i*).",
         "norm_inv_note": "Correlated standard-normal shocks Z are equivalent to applying NORM.INV/Phi^-1 to correlated uniform quantiles; demand uses Poisson(lambda_hat * exp(sigma Z - sigma^2/2)).",
         "initial_inventory_rule": "GCOO inventory starts from P*=x*, ALPACA inventory starts from latest snapshot, and both are pooled as available PM supply for combined market demand.",
     }
@@ -1865,8 +1867,11 @@ def run_parameter_search(
             "demand_calibration_factor": float(demand_meta_rows[0]["demand_calibration_factor"])
             if demand_meta_rows
             else 1.0,
+            "disabled_target_match_factor": float(demand_meta_rows[0].get("disabled_target_match_factor", 1.0))
+            if demand_meta_rows
+            else 1.0,
             "rate_method": rate_meta,
-            "note": "The same set of 100 synthetic Origin-Destination Pair demand days is reused for every parameter combination so lower demand cannot win trivially.",
+            "note": "The same set of observed-scale synthetic Origin-Destination Pair demand days is reused for every parameter combination so lower demand cannot win trivially.",
         },
         "best": best,
         "top_results": ranked_results[:10],
@@ -2245,22 +2250,22 @@ def temporal_simulation_panel(temporal: dict[str, Any], map_href: str) -> str:
         <div class="equation-note">
           <strong>회귀:</strong> 관측된 clean ride segment를 04:00 기준 operating day, 시간대 <code>h</code>, Origin-Destination Pair <code>o→r</code>로 집계한 뒤,
           <code>{safe(method["regression_formula"])}</code>를 <code>{safe(method.get("regression_solver", "fixed-effect regression"))}</code> 방식으로 추정했습니다.
-          관측 Origin-Destination Pair rate 총량은 validation 기준인 optimization 기대 ride <code>sum_i Q_i(x_i*)</code>와 맞도록
-          factor <code>{fmt_float(method.get("demand_calibration_factor", 1.0), 3)}</code>을 곱해 보정했습니다.
+          관측 Origin-Destination Pair rate는 operating day 기준의 하루 평균 scale을 그대로 사용합니다. optimization 기대 ride <code>sum_i Q_i(x_i*)</code>에 맞춰 확대하지 않으며,
+          rate scale은 <code>{fmt_float(method.get("demand_calibration_factor", 1.0), 3)}</code>입니다.
           <br><strong>Random value:</strong> 시간 공통 shock와 origin별 shock를 섞은 correlated standard normal <code>Z</code>를 만들고,
           <code>λ̂·exp(σZ-σ²/2)</code>를 Poisson rate로 사용했습니다. 이는 Excel의 <code>NORM.INV</code>로 상관된 분위수를 normal shock로 바꾸는 원리와 같습니다.
           <br><strong>초기 재고:</strong> GCOO는 <code>P*=x*</code> {fmt_int(summary["initial_gcoo_p_star"])}대, ALPACA는 latest snapshot {fmt_int(summary["initial_alpaca_latest"])}대를 사용해 총 {fmt_int(summary["initial_total_inventory"])}대로 시작합니다.
         </div>
       </div>
       <div class="grid three" style="margin-top:14px;">
-        <div class="metric"><div class="label">Target Q(x*) rides</div><div class="value">{fmt_float(summary.get("target_expected_rides", 0.0), 1)}</div></div>
+        <div class="metric"><div class="label">Model Q(x*) rides</div><div class="value">{fmt_float(summary.get("target_expected_rides", 0.0), 1)}</div></div>
         <div class="metric"><div class="label">Simulated combined demand</div><div class="value">{fmt_int(summary["simulated_demand"])}</div></div>
-        <div class="metric"><div class="label">Demand gap</div><div class="value">{fmt_float(summary.get("demand_gap_rate_vs_target", 0.0) * 100.0, 1)}%</div></div>
+        <div class="metric"><div class="label">Demand gap vs Q(x*)</div><div class="value">{fmt_float(summary.get("demand_gap_rate_vs_target", 0.0) * 100.0, 1)}%</div></div>
         <div class="metric"><div class="label">Served rides</div><div class="value">{fmt_int(summary["served_rides"])}</div></div>
         <div class="metric"><div class="label">Unmet rides</div><div class="value">{fmt_int(summary["unmet_rides"])}</div></div>
         <div class="metric"><div class="label">Service rate</div><div class="value">{fmt_float(100.0 * summary["service_rate"], 1)}%</div></div>
         <div class="metric"><div class="label">Modeled Origin-Destination Pairs</div><div class="value">{fmt_int(method.get("modeled_od_pairs", 0))}</div></div>
-        <div class="metric"><div class="label">Calibration factor</div><div class="value">{fmt_float(method.get("demand_calibration_factor", 1.0), 2)}</div></div>
+        <div class="metric"><div class="label">OD rate scale</div><div class="value">{fmt_float(method.get("demand_calibration_factor", 1.0), 2)}</div></div>
         <div class="metric"><div class="label">Shortage zones</div><div class="value">{fmt_int(summary["shortage_zone_count"])}</div></div>
         <div class="metric"><div class="label">Peak shortage hour</div><div class="value">{safe(summary["peak_shortage_hour"])}</div></div>
       </div>
