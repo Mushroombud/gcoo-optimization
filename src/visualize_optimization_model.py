@@ -2945,10 +2945,6 @@ def render_html(
     inject_hermes_widget(out_path)
 
 
-def mirror_html(src_path: Path, dst_path: Path) -> None:
-    dst_path.write_text(src_path.read_text(encoding="utf-8"), encoding="utf-8")
-
-
 def render_lab_shell(out_path: Path) -> None:
     html_text = """<!doctype html>
 <html lang="ko" data-hermes-mode="lab" data-hermes-sidebar="true">
@@ -3059,7 +3055,7 @@ def render(processed_dir: Path, out_dir: Path) -> dict[str, Any]:
         model_parameters,
         parameter_state,
     )
-    mirror_html(page_path, hermes_lab_path)
+    render_lab_shell(hermes_lab_path)
     payload = {
         "meta": meta,
         "model_parameters": {
