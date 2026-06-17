@@ -69,6 +69,17 @@ def copy_file(src: Path, dst: Path) -> None:
         shutil.copy2(src, dst)
 
 
+def strip_embedded_agent_widget(path: Path) -> None:
+    if not path.exists() or path.suffix.lower() != ".html":
+        return
+    text = path.read_text(encoding="utf-8")
+    cleaned = text.replace('  <script defer src="./hermes_widget.js"></script>\n', "")
+    cleaned = cleaned.replace('<script defer src="./hermes_widget.js"></script>\n', "")
+    cleaned = cleaned.replace('href="./index.html"', 'href="../index.html" target="_top"')
+    if cleaned != text:
+        path.write_text(cleaned, encoding="utf-8")
+
+
 def write_lab_readme() -> None:
     readme = LAB_ROOT / "LAB.md"
     if readme.exists():
@@ -121,6 +132,7 @@ def init_lab(force: bool = False, quick: bool = False) -> None:
         src = REPO_ROOT / src_rel
         if src.exists():
             copy_file(src, LAB_ROOT / dst_rel)
+            strip_embedded_agent_widget(LAB_ROOT / dst_rel)
 
     write_lab_readme()
     if not quick:

@@ -6,7 +6,9 @@ import json
 import math
 import os
 import re
+from datetime import datetime, timezone
 from pathlib import Path
+from typing import TextIO
 from typing import Any
 
 import numpy as np
@@ -292,24 +294,30 @@ def write_processed_outputs(
     return summary
 
 
-def acquire_lock(lock_path: Path):
+def acquire_lock(lock_path: Path, *, lock_name: str = "collector", exit_on_busy: bool = True) -> TextIO | None:
     ensure_dir(lock_path.parent)
-    lock_file = lock_path.open("w", encoding="utf-8")
+    lock_file = lock_path.open("a+", encoding="utf-8")
     try:
         fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
     except BlockingIOError:
-        print(f"another collector run is active; lock={lock_path}")
-        raise SystemExit(0)
-    lock_file.write(f"{os.getpid()}\n")
+        lock_file.close()
+        print(f"another {lock_name} run is active; lock={lock_path}")
+        if exit_on_busy:
+            raise SystemExit(0)
+        return None
+    lock_file.seek(0)
+    lock_file.truncate()
+    lock_file.write(f"{os.getpid()} {datetime.now(timezone.utc).isoformat()}\n")
     lock_file.flush()
     return lock_file
 
 
+def default_processing_lock_path(fetch_lock_path: Path) -> Path:
+    return fetch_lock_path.with_name(f"{fetch_lock_path.stem}_process{fetch_lock_path.suffix}")
+
+
 def run(args: argparse.Namespace) -> int:
     os.chdir(repo_root())
-    lock_file = acquire_lock(Path(args.lock_file))
-    _ = lock_file
-
     data_input.load_dotenv(args.env)
     config = configure_sejong_tago(data_input.load_config(args.config), args.city_name)
     battery_threshold = int(config["spatial"].get("battery_threshold", 20))
@@ -317,52 +325,81 @@ def run(args: argparse.Namespace) -> int:
 
     fetched_rows = None
     if not args.skip_fetch:
-        snapshot = data_input.fetch_tago_pm_snapshot(config, label)
-        fetched_rows = int(len(snapshot))
-        if snapshot.empty:
-            print(f"tago fetch returned no rows for city={args.city_name} label={label}")
+        fetch_lock = acquire_lock(Path(args.lock_file), lock_name="collector fetch")
+        try:
+            snapshot = data_input.fetch_tago_pm_snapshot(config, label)
+            fetched_rows = int(len(snapshot))
+            if snapshot.empty:
+                print(f"tago fetch returned no rows for city={args.city_name} label={label}")
+        finally:
+            if fetch_lock is not None:
+                fetch_lock.close()
 
-    raw_pattern = config["model"]["inputs"]["tago_pm_snapshots_glob"]
-    sejong_pattern = raw_pattern.replace("*", "sejong*")
-    raw, files = load_snapshot_files(sejong_pattern)
-    normalized, grid_meta = normalize_snapshots(raw, battery_threshold, args.zone_size_m)
-    summary = write_processed_outputs(
-        normalized,
-        files,
-        Path(args.processed_dir),
-        battery_threshold,
-        args.zone_size_m,
-        grid_meta,
-    )
-    summary.update(
-        {
+    process_lock_path = Path(args.processing_lock_file) if args.processing_lock_file else default_processing_lock_path(Path(args.lock_file))
+    process_lock = acquire_lock(process_lock_path, lock_name="collector processing", exit_on_busy=False)
+    if process_lock is None:
+        summary = {
+            "ok": True,
+            "processed": False,
+            "processing_skipped": True,
+            "created_at": now_kst_iso(),
             "collector_label": label,
             "city_name": args.city_name,
             "fetched_rows": fetched_rows,
             "skip_fetch": bool(args.skip_fetch),
+            "notes": [
+                "Another processing run is active; fetched snapshot was saved and processing will catch up on a later run."
+            ],
         }
-    )
-    if not args.skip_visualization:
-        visualization = visualize_sejong_tago.render(
+        append_jsonl(Path(args.processed_dir) / "collector_fetch_runs.jsonl", summary)
+        print(json.dumps(summary, ensure_ascii=False, sort_keys=True))
+        return 0
+
+    try:
+        raw_pattern = config["model"]["inputs"]["tago_pm_snapshots_glob"]
+        sejong_pattern = raw_pattern.replace("*", "sejong*")
+        raw, files = load_snapshot_files(sejong_pattern)
+        normalized, grid_meta = normalize_snapshots(raw, battery_threshold, args.zone_size_m)
+        summary = write_processed_outputs(
+            normalized,
+            files,
             Path(args.processed_dir),
-            Path(args.visualization_dir),
-            args.max_visualization_markers,
-            args.max_visualization_ride_segments,
-            args.max_visualization_od_lines,
+            battery_threshold,
+            args.zone_size_m,
+            grid_meta,
         )
-        summary["visualization"] = {
-            "charts_dashboard": visualization["charts_dashboard"],
-            "map": visualization["map"],
-            "manifest": str(Path(args.visualization_dir) / "sejong_visualization_manifest.json"),
-        }
-        optimization_visualization = visualize_optimization_model.render(
-            Path(args.processed_dir),
-            Path(args.visualization_dir),
+        summary.update(
+            {
+                "processed": True,
+                "collector_label": label,
+                "city_name": args.city_name,
+                "fetched_rows": fetched_rows,
+                "skip_fetch": bool(args.skip_fetch),
+            }
         )
-        summary["optimization_visualization"] = optimization_visualization["outputs"]
-    append_jsonl(Path(args.processed_dir) / "collector_runs.jsonl", summary)
-    print(json.dumps(summary, ensure_ascii=False, sort_keys=True))
-    return 0 if summary.get("ok") else 1
+        if not args.skip_visualization:
+            visualization = visualize_sejong_tago.render(
+                Path(args.processed_dir),
+                Path(args.visualization_dir),
+                args.max_visualization_markers,
+                args.max_visualization_ride_segments,
+                args.max_visualization_od_lines,
+            )
+            summary["visualization"] = {
+                "charts_dashboard": visualization["charts_dashboard"],
+                "map": visualization["map"],
+                "manifest": str(Path(args.visualization_dir) / "sejong_visualization_manifest.json"),
+            }
+            optimization_visualization = visualize_optimization_model.render(
+                Path(args.processed_dir),
+                Path(args.visualization_dir),
+            )
+            summary["optimization_visualization"] = optimization_visualization["outputs"]
+        append_jsonl(Path(args.processed_dir) / "collector_runs.jsonl", summary)
+        print(json.dumps(summary, ensure_ascii=False, sort_keys=True))
+        return 0 if summary.get("ok") else 1
+    finally:
+        process_lock.close()
 
 
 def main() -> None:
@@ -380,6 +417,10 @@ def main() -> None:
     parser.add_argument("--max-visualization-od-lines", type=int, default=120)
     parser.add_argument("--zone-size-m", type=int, default=500)
     parser.add_argument("--lock-file", default="data/raw/sejong_tago_collect.lock")
+    parser.add_argument(
+        "--processing-lock-file",
+        help="Optional lock for heavy preprocessing. Defaults to a sibling *_process.lock next to --lock-file.",
+    )
     parser.add_argument("--skip-fetch", action="store_true", help="Only rebuild processed outputs from existing raw CSVs.")
     parser.add_argument("--skip-visualization", action="store_true")
     args = parser.parse_args()

@@ -9,6 +9,7 @@
   const script = document.currentScript;
   const scriptUrl = script ? new URL(script.getAttribute("src") || "hermes_widget.js", window.location.href) : new URL("hermes_widget.js", window.location.href);
   const cssUrl = new URL("hermes_widget.css", scriptUrl);
+  if (scriptUrl.search) cssUrl.search = scriptUrl.search;
   const configuredBridge = window.HERMES_BRIDGE_URL || localStorage.getItem("hermesBridgeUrl") || "";
   const sameOriginBridge = window.location.protocol.startsWith("http") && window.location.port === "8787" ? window.location.origin : "";
   const bridgeUrl = (configuredBridge || sameOriginBridge || "http://127.0.0.1:8787").replace(/\/+$/, "");
@@ -188,8 +189,15 @@
     const timeText = formatSaveTime(save.timestamp);
     if (timeText) parts.push(timeText);
     parts.push(`${save.changedFileCount || 0}개 파일`);
-    if (save.shortId) parts.push(`코드 ${save.shortId}`);
     return parts.join(" · ");
+  }
+
+  function saveDisplayLabel(save, index, total) {
+    const raw = save.label || "";
+    if (raw === "초기 상태") return raw;
+    if (raw.startsWith("되돌리기 전 자동 세이브")) return `자동 세이브 ${total - index}`;
+    if (raw.startsWith("선택 세이브로 돌아감")) return `돌아간 상태 ${total - index}`;
+    return `세이브 ${total - index}`;
   }
 
   function mountWidget() {
@@ -281,14 +289,15 @@
           restoreButton.disabled = true;
           return;
         }
-        saves.forEach((save) => {
+        saves.forEach((save, index) => {
           const item = el("button", "hermes-save-item");
           item.type = "button";
           if (save.id === selectedSaveId) item.classList.add("selected");
           if (save.current) item.classList.add("current");
           const copy = el("span", "hermes-save-copy");
-          copy.append(el("b", "", save.label || "세이브"), el("span", "", saveMeta(save)));
+          copy.append(el("b", "", saveDisplayLabel(save, index, saves.length)), el("span", "", saveMeta(save)));
           item.append(el("span", "hermes-save-dot"), copy);
+          item.append(el("span", "hermes-save-code", save.shortId || ""));
           if (save.current) item.append(el("span", "hermes-save-chip", "현재"));
           item.addEventListener("click", () => {
             selectedSaveId = save.id;
@@ -306,7 +315,7 @@
           const payload = await labGet("/api/lab/saves");
           renderSaves(payload);
         } catch (_error) {
-          saveStatus.textContent = "에이전트 서버 연결 필요";
+          saveStatus.textContent = "세이브를 불러올 수 없음";
         }
       };
       saveButton.addEventListener("click", async () => {
@@ -418,7 +427,7 @@
         renderSessionList(payload.sessions || []);
       } catch (_error) {
         sessionList.innerHTML = "";
-        sessionList.appendChild(el("div", "hermes-session-empty", "에이전트 서버 연결 필요"));
+        sessionList.appendChild(el("div", "hermes-session-empty", "기록을 불러올 수 없음"));
       }
     };
 
@@ -495,13 +504,25 @@
 
   function mountLabControls() {
     const frame = document.querySelector("[data-hermes-lab-frame]");
-    const status = document.querySelector("[data-hermes-lab-status]");
+    const status = document.querySelector("[data-hermes-lab-status]") || { textContent: "" };
     const initButton = document.querySelector("[data-hermes-lab-init]");
     const saveButton = document.querySelector("[data-hermes-lab-save]");
     const revertButton = document.querySelector("[data-hermes-lab-revert]");
     const refreshButton = document.querySelector("[data-hermes-lab-refresh]");
-    if (!frame || !status) return;
+    if (!frame) return;
 
+    const normalizeLabFrameLinks = () => {
+      try {
+        const doc = frame.contentDocument;
+        if (!doc) return;
+        doc.querySelectorAll('a[href="./index.html"], a[href="index.html"]').forEach((link) => {
+          link.setAttribute("href", "../index.html");
+          link.setAttribute("target", "_top");
+        });
+      } catch (_error) {
+        // The iframe is same-origin in normal lab use; ignore if a browser blocks access.
+      }
+    };
     const setBusy = (busy) => {
       [initButton, saveButton, revertButton, refreshButton].filter(Boolean).forEach((button) => {
         button.disabled = busy;
@@ -530,8 +551,10 @@
     saveButton && saveButton.addEventListener("click", () => run("저장 중", () => labRequest("/api/lab/save")));
     revertButton && revertButton.addEventListener("click", () => run("되돌리는 중", () => labRequest("/api/lab/revert")));
     refreshButton && refreshButton.addEventListener("click", refreshFrame);
+    frame.addEventListener("load", normalizeLabFrameLinks);
     window.addEventListener("hermes-lab-refresh-needed", refreshFrame);
 
+    normalizeLabFrameLinks();
     run("준비 중", () => labRequest("/api/lab/init", { quick: true }));
   }
 

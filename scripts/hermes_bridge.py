@@ -320,6 +320,12 @@ def git_status() -> str:
 def save_label(subject: str) -> str:
     if subject.startswith("Initialize agent lab workspace"):
         return "초기 상태"
+    if subject.startswith("세이브 "):
+        return subject
+    if subject.startswith("되돌리기 전 자동 세이브"):
+        return subject
+    if subject.startswith("선택 세이브로 돌아감"):
+        return subject
     if subject.startswith("Save agent lab state "):
         return "세이브 " + subject.removeprefix("Save agent lab state ")
     return subject or "세이브"
@@ -379,6 +385,7 @@ def lab_saves(limit: int = 30) -> dict[str, Any]:
 
 
 def create_lab_save(prefix: str = "세이브") -> dict[str, Any]:
+    ensure_lab(quick=True)
     status = git_status()
     if not status:
         return {"saved": False, "message": "변경 없음"}
