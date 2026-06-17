@@ -17,7 +17,7 @@
 | --- | --- |
 | `Data_Model_Sheet.md` | 데이터 구조와 optimization model을 설명하는 Model Sheet |
 | `outputs/visualizations/optimization_model.html` | 모델 식, 변수, 제약조건, 결과, simulation을 보여주는 HTML dashboard |
-| `outputs/visualizations/hermes_lab.html` | 쓰기 가능한 독립 실험실 진입점. 복제된 model/page/code/processed data를 iframe으로 띄우고 우측 Agent sidebar에서 상태 저장과 되돌리기를 제공 |
+| `outputs/visualizations/hermes_lab.html` | 쓰기 가능한 독립 실험실 진입점. 복제된 model/page/code와 optimization model에 필요한 processed subset을 iframe으로 띄우고 우측 Agent sidebar에서 상태 저장과 되돌리기를 제공 |
 | `outputs/visualizations/optimization_model_map.html` | zone별 최적 배치량 `x*` 지도 |
 | `outputs/visualizations/temporal_inventory_map.html` | Origin-Destination Pair 기반 하루 재고 simulation을 Sejong 500m grid 지도 위에 animation으로 표시 |
 | `outputs/visualizations/optimization_model_data.json` | 최적화 결과와 산출물 경로 JSON |

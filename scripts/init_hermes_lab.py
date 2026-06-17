@@ -18,16 +18,19 @@ DIRECTORY_CLONES = [
     ("outputs/prototype", "outputs/prototype"),
 ]
 
-PROCESSED_FILES = [
+LAB_PROCESSED_FILES = [
     "collector_runs.jsonl",
-    "sejong_pm_activity_by_zone.csv",
-    "sejong_pm_device_intervals.csv",
     "sejong_pm_inferred_rides.csv",
     "sejong_pm_latest_snapshot.csv",
     "sejong_pm_od_flows.csv",
     "sejong_pm_operator_move_candidates.csv",
     "sejong_pm_operator_snapshot_counts.csv",
     "sejong_pm_preprocess_summary.json",
+]
+
+LARGE_REFERENCE_PROCESSED_FILES = [
+    "sejong_pm_activity_by_zone.csv",
+    "sejong_pm_device_intervals.csv",
     "sejong_pm_snapshots_accumulated.csv",
     "sejong_pm_zone_snapshot_counts.csv",
 ]
@@ -55,6 +58,7 @@ VISUALIZATION_FILES = [
 LAB_GITIGNORE = [
     "# Lab-only guardrails",
     "data/raw/",
+    *[f"data/processed/sejong_tago/{name}" for name in LARGE_REFERENCE_PROCESSED_FILES],
     "__pycache__/",
     "*.pyc",
     ".run/",
@@ -150,7 +154,7 @@ def init_lab(force: bool = False, quick: bool = False) -> None:
 
     processed_dst = LAB_ROOT / "data" / "processed" / "sejong_tago"
     processed_dst.mkdir(parents=True, exist_ok=True)
-    for filename in PROCESSED_FILES:
+    for filename in LAB_PROCESSED_FILES:
         src = REPO_ROOT / "data" / "processed" / "sejong_tago" / filename
         if src.exists():
             copy_file(src, processed_dst / filename, overwrite=refresh_existing)

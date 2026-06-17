@@ -59,7 +59,7 @@ def maybe_reexec_with_hermes_python() -> None:
         if current.resolve() == resolved:
             return
         os.environ["GCOO_HERMES_BRIDGE_REEXEC"] = "1"
-        os.execv(str(resolved), [str(resolved), *sys.argv])
+        os.execv(str(candidate), [str(candidate), *sys.argv])
 
 
 if str(HERMES_ROOT) not in sys.path:
@@ -970,7 +970,7 @@ def main() -> None:
     parser.add_argument("--init-lab", action="store_true", help="Initialize the lab workspace before serving.")
     args = parser.parse_args()
     if args.init_lab:
-        ensure_lab(quick=False)
+        ensure_lab(quick=True)
     server = ThreadingHTTPServer((args.host, args.port), HermesBridgeHandler)
     print(f"Agent bridge: http://{args.host}:{args.port}/")
     print(f"Visualizations: http://{args.host}:{args.port}/index.html")
