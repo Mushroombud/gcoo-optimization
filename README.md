@@ -17,7 +17,7 @@
 | --- | --- |
 | `Data_Model_Sheet.md` | 데이터 구조와 optimization model을 설명하는 Model Sheet |
 | `outputs/visualizations/optimization_model.html` | 모델 식, 변수, 제약조건, 결과, simulation을 보여주는 HTML dashboard |
-| `outputs/visualizations/hermes_lab.html` | `optimization_model.html`과 동일한 dashboard mirror. Hermes Lab 진입점에서도 기본 내용이 달라지지 않도록 같은 HTML을 생성 |
+| `outputs/visualizations/hermes_lab.html` | 쓰기 가능한 독립 실험실 진입점. 복제된 model/page/code/processed data를 iframe으로 띄우고 우측 Agent sidebar에서 상태 저장과 되돌리기를 제공 |
 | `outputs/visualizations/optimization_model_map.html` | zone별 최적 배치량 `x*` 지도 |
 | `outputs/visualizations/temporal_inventory_map.html` | Origin-Destination Pair 기반 하루 재고 simulation을 Sejong 500m grid 지도 위에 animation으로 표시 |
 | `outputs/visualizations/optimization_model_data.json` | 최적화 결과와 산출물 경로 JSON |
@@ -25,6 +25,7 @@
 | `outputs/visualizations/temporal_inventory_hourly_summary.csv` | Origin-Destination Pair 기반 하루 재고 simulation의 시간대별 수요/처리/미처리 summary |
 | `outputs/visualizations/temporal_inventory_od_movements.csv` | 시간대별 simulated Origin-Destination Pair demand, served movement, unmet movement, random shock 기록 |
 | `outputs/visualizations/parameter_search_results.json` | λ, β, θ multi-start calibration simulation 결과 |
+| `outputs/visualizations/optimization_model_constants.json` | `이 최적값 반영하기` 버튼으로 승인한 λ, β, θ 값. 다음 optimization dashboard 재계산 때 실제 상수로 사용 |
 | `outputs/visualizations/sejong_map.html` | 최신 PM 위치와 ride/Origin-Destination Pair 기반 지도 |
 | `outputs/visualizations/sejong_charts_dashboard.html` | 수집량, 공급자별 현황, battery/activity chart |
 
@@ -242,7 +243,11 @@ OOM 방지를 위해 demand scenario는 worker 초기화 시 compact representat
 
 낮은 parameter가 demand 자체를 줄여 이기는 문제를 피하기 위해, 모든 parameter 조합은 같은 100개 demand scenario set으로 scoring합니다. 즉, parameter는 “수요를 작게 만드는 능력”이 아니라 “같은 수요를 더 잘 처리하는 배치를 만드는 능력”으로 비교됩니다.
 
-Frontend에서는 `Full-run 시뮬레이션 시작하기` 버튼을 누르면 loading indicator가 돌고 버튼이 disabled 됩니다. Backend도 lock을 사용하므로 이미 실행 중인 request가 있으면 추가 request는 `409`로 거절됩니다. 완료되면 결과는 화면에 표시되고, `outputs/visualizations/parameter_search_results.json`에도 저장됩니다.
+Frontend에서는 `Full-run 시뮬레이션 시작하기` 버튼을 누르면 loading indicator가 돌고 버튼이 disabled 됩니다. 동시에 browser는 `GET /api/parameter-search-progress`를 1초 간격으로 polling해서 실제 완료된 parameter 조합 수와 case 수를 읽습니다. ETA는 초기 benchmark 고정값이 아니라 `completed_cases / elapsed_seconds`로 계산한 실제 처리속도 기준으로 갱신됩니다.
+
+Backend도 lock을 사용하므로 이미 실행 중인 request가 있으면 추가 request는 `409`로 거절됩니다. 완료되면 결과는 화면에 표시되고, `outputs/visualizations/parameter_search_results.json`에도 저장됩니다. 결과 JSON에는 `elapsed_seconds`와 `actual_cases_per_second`도 함께 남겨 실제 full-run 소요시간을 audit할 수 있습니다.
+
+Full-run 완료 후 화면의 `이 최적값 반영하기` 버튼을 누르면 best `λ/β/θ`가 `outputs/visualizations/optimization_model_constants.json`에 승인값으로 저장됩니다. 화면에는 `(5분 내로 재계산 시 반영됩니다)` 문구를 함께 표시합니다. 이후 collector 또는 visualization 재계산이 실행되면 renderer는 이 승인파일을 읽어 `build_zone_model(lambda_market=...)`과 `optimize_dashboard_solution(beta_capture=..., theta_competition=...)`에 실제 상수로 사용합니다.
 
 ---
 

@@ -794,11 +794,13 @@ Python `threading`은 GIL 때문에 CPU-bound loop를 여러 core에 잘 분산�
 
 ### 11.3 Frontend/Backend Control
 
-Frontend의 `Full-run 시뮬레이션 시작하기` 버튼을 누르면 loading indicator가 켜지고 버튼이 disabled 된다. 완료 전까지 같은 page에서 추가 request를 보낼 수 없다.
+Frontend의 `Full-run 시뮬레이션 시작하기` 버튼을 누르면 loading indicator가 켜지고 버튼이 disabled 된다. 완료 전까지 같은 page에서 추가 request를 보낼 수 없다. 같은 화면은 `GET /api/parameter-search-progress`를 1초 간격으로 polling해서 실제 완료된 parameter 조합 수와 case 수를 읽고, `completed_cases / elapsed_seconds` 기준의 실제 처리속도로 ETA를 갱신한다.
 
 Backend도 `threading.Lock`으로 동일 endpoint의 동시 실행을 막는다. 이미 실행 중인 request가 있으면 `409`를 반환한다. Full-run은 `os.cpu_count() - 2` worker로 실행되며, 요청에서 `max_workers`를 넘기면 해당 값을 상한 내에서 사용할 수 있다.
 
 OOM 방지를 위해 2,867,500개 case를 한 번에 메모리에 쌓지 않는다. 100개 Origin-Destination Pair demand scenario는 compact representation으로 변환한 뒤 worker 초기화 시 전달하고, 각 worker는 parameter 조합을 맡아 summary만 반환한다. case-level movement log는 calibration 중 저장하지 않는다. 완료 후 다음 항목을 `parameter_search_results.json`에 저장한다.
+
+Full-run 완료 후 `이 최적값 반영하기` 버튼을 누르면 best `λ/β/θ`가 `optimization_model_constants.json`에 승인값으로 저장된다. Frontend에는 `(5분 내로 재계산 시 반영됩니다)` 문구를 표시한다. 다음 collector 또는 visualization 재계산 때 `visualize_optimization_model.render()`는 이 승인파일을 읽고, `λ`는 `build_zone_model()`, `β/θ`는 `optimize_dashboard_solution()`의 실제 입력 상수로 사용한다.
 
 | 저장 항목 | 의미 |
 | --- | --- |
@@ -806,11 +808,20 @@ OOM 방지를 위해 2,867,500개 case를 한 번에 메모리에 쌓지 않는�
 | `trials_per_parameter_combination` | 각 parameter 조합별 demand simulation 반복 횟수 |
 | `case_count` | 전체 평가 case 수 |
 | `estimated_runtime_seconds` | 현재 benchmark 기준 예상 실행 시간 |
+| `elapsed_seconds` | 실제 full-run 완료까지 걸린 시간 |
+| `actual_cases_per_second` | 실제 완료 case 수와 경과 시간으로 계산한 처리속도 |
 | `worker_count` | calibration에 사용한 worker process 수 |
 | `reserved_cpu_cores` | cron scheduler 등을 위해 남긴 CPU core 수 |
 | `baseline_score` | 기존 `λ=0.30`, `β=0.08`, `θ=1.00` 기준 평균 unmet rides |
 | `best` | 평균 unmet rides가 가장 낮은 parameter 조합 |
 | `top_results` | 상위 10개 parameter 조합 |
+
+| 승인 저장 항목 | 의미 |
+| --- | --- |
+| `optimization_model_constants.json.lambda_market` | 다음 재계산에서 사용할 승인 `λ` |
+| `optimization_model_constants.json.beta_capture` | 다음 재계산에서 사용할 승인 `β` |
+| `optimization_model_constants.json.theta_competition` | 다음 재계산에서 사용할 승인 `θ` |
+| `optimization_model_constants.json.best_summary` | 승인 당시 best candidate의 핵심 score audit |
 
 이 calibration layer는 “현재 baseline parameter가 틀렸다”는 최종 결론을 자동으로 내리는 장치가 아니다. 기존 상수값을 고정 assumption으로 두지 않고, unmet ride 기준으로 재검증할 수 있게 하는 장치다.
 

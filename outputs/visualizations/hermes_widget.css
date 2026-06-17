@@ -449,6 +449,120 @@
   font-size: 13px;
 }
 
+.hermes-message.rendered {
+  white-space: normal;
+}
+
+.hermes-message.rendered > :first-child {
+  margin-top: 0;
+}
+
+.hermes-message.rendered > :last-child {
+  margin-bottom: 0;
+}
+
+.hermes-message.rendered p {
+  margin: 0 0 8px;
+}
+
+.hermes-message.rendered h2,
+.hermes-message.rendered h3,
+.hermes-message.rendered h4 {
+  margin: 11px 0 7px;
+  color: var(--hermes-ink);
+  font-size: 13px;
+  line-height: 1.35;
+}
+
+.hermes-message.rendered h2 {
+  font-size: 14px;
+}
+
+.hermes-message.rendered ul,
+.hermes-message.rendered ol {
+  margin: 0 0 8px;
+  padding-left: 18px;
+}
+
+.hermes-message.rendered li {
+  margin: 2px 0;
+}
+
+.hermes-message.rendered blockquote {
+  margin: 0 0 8px;
+  padding: 7px 9px;
+  border-left: 3px solid #9cc9c3;
+  background: #f1f7f6;
+  color: #334155;
+}
+
+.hermes-message.rendered hr {
+  margin: 10px 0;
+  border: 0;
+  border-top: 1px solid var(--hermes-line);
+}
+
+.hermes-message.rendered code {
+  border-radius: 5px;
+  padding: 1px 4px;
+  background: #eef2f7;
+  color: #0f172a;
+  font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+.hermes-message.rendered pre {
+  max-width: 100%;
+  margin: 0 0 8px;
+  overflow-x: auto;
+  border: 1px solid #d8e1ec;
+  border-radius: 8px;
+  background: #f8fafc;
+}
+
+.hermes-message.rendered pre code {
+  display: block;
+  padding: 9px 10px;
+  background: transparent;
+  white-space: pre;
+}
+
+.hermes-table-wrap,
+.hermes-math-block {
+  max-width: 100%;
+  margin: 0 0 8px;
+  overflow-x: auto;
+}
+
+.hermes-message.rendered table {
+  width: 100%;
+  border-collapse: collapse;
+  background: #fff;
+  font-size: 12px;
+  white-space: normal;
+}
+
+.hermes-message.rendered th,
+.hermes-message.rendered td {
+  padding: 6px 7px;
+  border: 1px solid #d8e1ec;
+  text-align: left;
+  vertical-align: top;
+}
+
+.hermes-message.rendered th {
+  background: #f1f5f9;
+  font-weight: 800;
+}
+
+.hermes-math,
+.hermes-math-block {
+  color: #0f172a;
+}
+
+.hermes-math {
+  white-space: nowrap;
+}
+
 .hermes-message.user {
   margin-left: auto;
   border-color: #b7d5d2;

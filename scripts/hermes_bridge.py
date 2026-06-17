@@ -5,6 +5,8 @@ import argparse
 import json
 import os
 import queue
+import re
+import shlex
 import subprocess
 import sys
 import threading
@@ -21,9 +23,20 @@ from urllib.parse import parse_qs, urlparse
 REPO_ROOT = Path(__file__).resolve().parents[1]
 VISUALIZATION_ROOT = REPO_ROOT / "outputs" / "visualizations"
 LAB_ROOT = VISUALIZATION_ROOT / "hermes_lab_workspace"
+RAW_DATA_ROOT = REPO_ROOT / "data" / "raw"
 HERMES_ROOT = REPO_ROOT.parent / "hermes-agent"
 HERMES_VENV_PYTHON = Path("/usr/local/lib/hermes-agent/venv/bin/python")
 MEMORY_PATH = REPO_ROOT / "Memory.md"
+LAB_FORBIDDEN_RELATIVE_PREFIXES = (Path("data/raw"),)
+ORIGINAL_PROTECTED_PATHS = (
+    RAW_DATA_ROOT,
+    REPO_ROOT / "src",
+    REPO_ROOT / "scripts",
+    VISUALIZATION_ROOT / "optimization_model.html",
+    VISUALIZATION_ROOT / "optimization_model_map.html",
+    VISUALIZATION_ROOT / "optimization_model_data.json",
+)
+_LAB_TOOL_GUARDS_INSTALLED = False
 
 
 def maybe_reexec_with_hermes_python() -> None:
@@ -61,6 +74,7 @@ Your writable workspace is {LAB_ROOT}.
 The lab is an isolated clone of the optimization model page, model code, configuration, model outputs, visualization assets, and processed back data.
 Freely modify model assumptions, variables, visualization HTML, copied data, or copied Python code inside the lab workspace when the user asks.
 Do not modify files outside {LAB_ROOT}.
+You may read original raw data under {RAW_DATA_ROOT} to inspect columns and data types, but never modify it.
 When you change a visualization, update the lab files so the iframe page can refresh immediately.
 Prefer direct, visible changes over long explanations.
 """.strip()
@@ -100,6 +114,192 @@ def run(command: list[str], cwd: Path | None = None) -> subprocess.CompletedProc
     return subprocess.run(command, cwd=cwd, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False)
 
 
+def tool_error(message: str) -> str:
+    return json.dumps({"error": message}, ensure_ascii=False)
+
+
+def is_lab_task(task_id: Any) -> bool:
+    return str(task_id or "").startswith(mode_prefix("lab"))
+
+
+def is_within(path: Path, root: Path) -> bool:
+    try:
+        path.resolve().relative_to(root.resolve())
+        return True
+    except (OSError, ValueError):
+        return False
+
+
+def is_raw_data_path(path: Path) -> bool:
+    return is_within(path, RAW_DATA_ROOT)
+
+
+def resolve_lab_path(path: str | None, allow_raw_read: bool = False) -> Path:
+    raw = str(path or ".").strip() or "."
+    candidate = Path(raw).expanduser()
+    if allow_raw_read and not candidate.is_absolute():
+        parts = candidate.parts
+        if len(parts) >= 2 and parts[0] == "data" and parts[1] == "raw":
+            return (REPO_ROOT / candidate).resolve()
+    if not candidate.is_absolute():
+        candidate = LAB_ROOT / candidate
+    return candidate.resolve()
+
+
+def lab_path_guard(path: str | None, purpose: str = "path", allow_raw_read: bool = False) -> str | None:
+    try:
+        resolved = resolve_lab_path(path, allow_raw_read=allow_raw_read)
+        lab_root = LAB_ROOT.resolve()
+        if allow_raw_read and is_raw_data_path(resolved):
+            return None
+        if is_raw_data_path(resolved):
+            return "Raw Data는 원본 단일 source-of-truth로 읽기만 허용됩니다."
+        resolved.relative_to(lab_root)
+    except (OSError, ValueError):
+        return f"{purpose}는 실험실 폴더 안에서만 사용할 수 있습니다: {path}"
+    try:
+        relative = resolved.relative_to(LAB_ROOT.resolve())
+    except ValueError:
+        return f"{purpose}는 실험실 폴더 안에서만 사용할 수 있습니다: {path}"
+    for prefix in LAB_FORBIDDEN_RELATIVE_PREFIXES:
+        if relative == prefix or prefix in relative.parents:
+            return "Raw Data는 원본 단일 source-of-truth로 읽기만 허용됩니다."
+    return None
+
+
+def guarded_patch_paths(patch_text: str | None) -> list[str]:
+    if not patch_text:
+        return []
+    paths: list[str] = []
+    pattern = r"^\*\*\*\s+(?:Update|Add|Delete)\s+File:\s*(.+)$"
+    for match in re.finditer(pattern, patch_text, re.MULTILINE):
+        paths.append(match.group(1).strip())
+    for match in re.finditer(r"^\*\*\*\s+Move\s+File:\s*(.+?)\s*->\s*(.+)$", patch_text, re.MULTILINE):
+        paths.extend([match.group(1).strip(), match.group(2).strip()])
+    return paths
+
+
+def absolutize_lab_patch_paths(patch_text: str | None) -> str | None:
+    if not patch_text:
+        return patch_text
+
+    def replace_file_header(match: re.Match[str]) -> str:
+        return f"{match.group(1)}{resolve_lab_path(match.group(2).strip())}"
+
+    text = re.sub(
+        r"^(\*\*\*\s+(?:Update|Add|Delete)\s+File:\s*)(.+)$",
+        replace_file_header,
+        patch_text,
+        flags=re.MULTILINE,
+    )
+
+    def replace_move_header(match: re.Match[str]) -> str:
+        old_path = resolve_lab_path(match.group(2).strip())
+        new_path = resolve_lab_path(match.group(3).strip())
+        return f"{match.group(1)}{old_path} -> {new_path}"
+
+    return re.sub(
+        r"^(\*\*\*\s+Move\s+File:\s*)(.+?)\s*->\s*(.+)$",
+        replace_move_header,
+        text,
+        flags=re.MULTILINE,
+    )
+
+
+def terminal_command_guard(command: str, workdir: str | None) -> str | None:
+    command_text = str(command or "")
+    if not command_text.strip():
+        return "실행할 명령이 비어 있습니다"
+
+    workdir_error = lab_path_guard(workdir or ".", "workdir")
+    if workdir_error:
+        return workdir_error
+
+    for protected in ORIGINAL_PROTECTED_PATHS:
+        protected_text = str(protected.resolve())
+        if protected_text in command_text:
+            return f"원본 경로는 실험실 명령에서 수정할 수 없습니다: {protected_text}"
+
+    if re.search(r"(^|[;&|]\s*)cd\s+(\.\.|/root/gcoo-optimization(?:\s|$|/))", command_text):
+        return "실험실 밖으로 이동하는 명령은 사용할 수 없습니다"
+
+    try:
+        tokens = shlex.split(command_text)
+    except ValueError:
+        tokens = command_text.split()
+    for token in tokens:
+        if token in {"..", "../"} or token.startswith("../") or "/../" in token:
+            return "상위 폴더로 벗어나는 경로는 사용할 수 없습니다"
+        if token.startswith("/"):
+            try:
+                resolved = Path(token).expanduser().resolve()
+            except OSError:
+                continue
+            if not is_within(resolved, LAB_ROOT):
+                for protected in ORIGINAL_PROTECTED_PATHS:
+                    if resolved == protected.resolve() or protected.resolve() in resolved.parents:
+                        return f"원본 경로는 실험실 명령에서 수정할 수 없습니다: {resolved}"
+    return None
+
+
+def install_lab_tool_guards() -> None:
+    global _LAB_TOOL_GUARDS_INSTALLED
+    if _LAB_TOOL_GUARDS_INSTALLED:
+        return
+    import model_tools  # noqa: F401 - importing discovers built-in tools
+    from tools.registry import registry
+
+    def wrap_path_tool(tool_name: str, path_keys: tuple[str, ...]) -> None:
+        entry = registry.get_entry(tool_name)
+        if entry is None:
+            return
+        original_handler = entry.handler
+        allow_raw_read = tool_name in {"read_file", "search_files"}
+
+        def guarded(args: dict[str, Any], **kw: Any) -> Any:
+            if is_lab_task(kw.get("task_id")):
+                args = dict(args)
+                for key in path_keys:
+                    if key in args and args.get(key) is not None:
+                        error = lab_path_guard(args.get(key), key, allow_raw_read=allow_raw_read)
+                        if error:
+                            return tool_error(error)
+                        args[key] = str(resolve_lab_path(args.get(key), allow_raw_read=allow_raw_read))
+                if tool_name == "patch" and args.get("mode", "replace") == "patch":
+                    for patch_path in guarded_patch_paths(args.get("patch")):
+                        error = lab_path_guard(patch_path, "patch path")
+                        if error:
+                            return tool_error(error)
+                    args["patch"] = absolutize_lab_patch_paths(args.get("patch"))
+                if tool_name == "search_files" and not args.get("path"):
+                    args["path"] = str(LAB_ROOT.resolve())
+            return original_handler(args, **kw)
+
+        entry.handler = guarded
+
+    wrap_path_tool("read_file", ("path",))
+    wrap_path_tool("write_file", ("path",))
+    wrap_path_tool("search_files", ("path",))
+    wrap_path_tool("patch", ("path",))
+
+    terminal_entry = registry.get_entry("terminal")
+    if terminal_entry is not None:
+        original_terminal = terminal_entry.handler
+
+        def guarded_terminal(args: dict[str, Any], **kw: Any) -> Any:
+            if is_lab_task(kw.get("task_id")):
+                error = terminal_command_guard(str(args.get("command") or ""), args.get("workdir"))
+                if error:
+                    return tool_error(error)
+                args = dict(args)
+                args["workdir"] = str(resolve_lab_path(args.get("workdir") or "."))
+            return original_terminal(args, **kw)
+
+        terminal_entry.handler = guarded_terminal
+
+    _LAB_TOOL_GUARDS_INSTALLED = True
+
+
 def ensure_lab(quick: bool = True) -> None:
     from init_hermes_lab import init_lab
 
@@ -133,22 +333,17 @@ def normalize_session_id(mode: str, session_id: str | None = None) -> tuple[str,
 def register_toolsets() -> None:
     import toolsets
 
-    toolsets.TOOLSETS.setdefault(
-        "gcoo-read",
-        {
-            "description": "Read-only GCOO model inspection tools",
-            "tools": ["read_file", "search_files"],
-            "includes": [],
-        },
-    )
-    toolsets.TOOLSETS.setdefault(
-        "gcoo-lab",
-        {
-            "description": "Writable GCOO lab tools",
-            "tools": ["read_file", "write_file", "patch", "search_files", "terminal", "process", "execute_code"],
-            "includes": [],
-        },
-    )
+    toolsets.TOOLSETS["gcoo-read"] = {
+        "description": "Read-only GCOO model inspection tools",
+        "tools": ["read_file", "search_files"],
+        "includes": [],
+    }
+    toolsets.TOOLSETS["gcoo-lab"] = {
+        "description": "Writable GCOO lab tools scoped to the isolated lab workspace",
+        "tools": ["read_file", "write_file", "patch", "search_files", "terminal", "process"],
+        "includes": [],
+    }
+    install_lab_tool_guards()
 
 
 def runtime_kwargs() -> dict[str, Any]:
@@ -256,6 +451,8 @@ def make_agent_callbacks(session_id: str) -> dict[str, Callable[..., None]]:
         elif len(args) >= 2:
             kind, message = args[0], args[1]
         text = compact_text(message)
+        if str(kind or "") == "lifecycle" and ("caps context" in text or "auto-compaction" in text):
+            return
         if text:
             emit_session_event(session_id, "status", {"text": text, "kind": str(kind or "status")})
 
@@ -318,7 +515,6 @@ def make_agent_session(mode: str, session_id: str, history: list[dict[str, Any]]
         session_id=hermes_session_id,
         skip_context_files=True,
         load_soul_identity=False,
-        max_iterations=24 if mode == "lab" else 12,
         ephemeral_system_prompt=system_prompt,
         session_db=session_db,
         **make_agent_callbacks(hermes_session_id),

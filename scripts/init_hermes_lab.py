@@ -42,8 +42,21 @@ VISUALIZATION_FILES = [
     ("outputs/visualizations/optimization_model.html", "optimization_model.html"),
     ("outputs/visualizations/optimization_model_map.html", "optimization_model_map.html"),
     ("outputs/visualizations/optimization_model_data.json", "optimization_model_data.json"),
+    ("outputs/visualizations/temporal_inventory_map.html", "temporal_inventory_map.html"),
+    ("outputs/visualizations/temporal_inventory_shortages.csv", "temporal_inventory_shortages.csv"),
+    ("outputs/visualizations/temporal_inventory_hourly_summary.csv", "temporal_inventory_hourly_summary.csv"),
+    ("outputs/visualizations/temporal_inventory_od_movements.csv", "temporal_inventory_od_movements.csv"),
+    ("outputs/visualizations/parameter_search_results.json", "parameter_search_results.json"),
     ("outputs/visualizations/hermes_widget.css", "hermes_widget.css"),
     ("outputs/visualizations/hermes_widget.js", "hermes_widget.js"),
+]
+
+LAB_GITIGNORE = [
+    "# Lab-only guardrails",
+    "data/raw/",
+    "__pycache__/",
+    "*.pyc",
+    ".run/",
 ]
 
 
@@ -98,6 +111,21 @@ def write_lab_readme() -> None:
     )
 
 
+def write_lab_gitignore() -> None:
+    path = LAB_ROOT / ".gitignore"
+    text = "\n".join(LAB_GITIGNORE) + "\n"
+    if not path.exists() or path.read_text(encoding="utf-8") != text:
+        path.write_text(text, encoding="utf-8")
+
+
+def remove_forbidden_lab_clones() -> None:
+    raw_data = LAB_ROOT / "data" / "raw"
+    if raw_data.is_symlink() or raw_data.is_file():
+        raw_data.unlink()
+    elif raw_data.exists():
+        shutil.rmtree(raw_data)
+
+
 def init_git() -> None:
     if not (LAB_ROOT / ".git").exists():
         run(["git", "init"], cwd=LAB_ROOT)
@@ -135,6 +163,8 @@ def init_lab(force: bool = False, quick: bool = False) -> None:
             strip_embedded_agent_widget(LAB_ROOT / dst_rel)
 
     write_lab_readme()
+    write_lab_gitignore()
+    remove_forbidden_lab_clones()
     if not quick:
         init_git()
     elif not (LAB_ROOT / ".git").exists():

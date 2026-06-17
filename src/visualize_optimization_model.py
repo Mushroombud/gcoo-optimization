@@ -6,9 +6,10 @@ import math
 import gc
 import multiprocessing
 import os
+import time
 from pathlib import Path
-from typing import Any
-from concurrent.futures import ProcessPoolExecutor
+from typing import Any, Callable
+from concurrent.futures import ProcessPoolExecutor, as_completed
 
 os.environ.setdefault("OMP_NUM_THREADS", "1")
 os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
@@ -55,6 +56,7 @@ PARAMETER_SEARCH_TOP_K = 10
 PARAMETER_SEARCH_RESERVED_CPU_CORES = 2
 PARAMETER_SEARCH_CHUNK_SIZE = 8
 PARAMETER_SEARCH_OBSERVED_SECONDS_PER_CASE = 0.04
+APPROVED_MODEL_PARAMETERS_FILE = "optimization_model_constants.json"
 SEJONG_GRID_LAT_STEP = 0.0044915558749550845
 SEJONG_GRID_LON_STEP = 0.005587124211191894
 OPERATING_HOUR_SEQUENCE = list(range(4, 24)) + list(range(0, 4))
@@ -63,6 +65,62 @@ OPERATOR_MOVE_FILTER_NOTE = (
     "Segments flagged as likely operator moves are removed when speed > 28km/h, "
     "or speed > 25km/h with repeated fast moves, same Origin-Destination Pair/time clusters, or large battery delta."
 )
+
+
+def default_model_parameters() -> dict[str, float]:
+    return {
+        "lambda_market": float(LAMBDA_MARKET),
+        "beta_capture": float(BETA_CAPTURE),
+        "theta_competition": float(THETA_COMPETITION),
+    }
+
+
+def coerce_model_parameters(raw: dict[str, Any] | None) -> dict[str, float]:
+    defaults = default_model_parameters()
+    raw = raw or {}
+    parameters: dict[str, float] = {}
+    for key, default_value in defaults.items():
+        try:
+            value = float(raw.get(key, default_value))
+        except (TypeError, ValueError):
+            value = default_value
+        parameters[key] = value
+    return parameters
+
+
+def read_approved_model_parameters(out_dir: Path) -> dict[str, Any]:
+    path = Path(out_dir) / APPROVED_MODEL_PARAMETERS_FILE
+    defaults = default_model_parameters()
+    if not path.exists():
+        return {
+            "ok": True,
+            "source": "default",
+            "path": str(path),
+            "parameters": defaults,
+            "note": "No approved calibration constants file exists; using code defaults.",
+        }
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        return {
+            "ok": False,
+            "source": "default",
+            "path": str(path),
+            "parameters": defaults,
+            "note": f"Approved constants file could not be read; using code defaults. error={exc}",
+        }
+
+    return {
+        "ok": True,
+        "source": "approved",
+        "path": str(path),
+        "parameters": coerce_model_parameters(payload),
+        "approved_at_epoch": payload.get("approved_at_epoch"),
+        "approved_at": payload.get("approved_at"),
+        "source_results": payload.get("source_results"),
+        "note": payload.get("message", "Using approved calibration constants."),
+        "raw": payload,
+    }
 
 
 def read_csv(path: Path) -> pd.DataFrame:
@@ -388,7 +446,10 @@ def svg_cost_revenue(rows: pd.DataFrame) -> str:
     return "\n".join(parts)
 
 
-def svg_capture_curve_korean() -> str:
+def svg_capture_curve_korean(model_parameters: dict[str, float] | None = None) -> str:
+    parameters = coerce_model_parameters(model_parameters)
+    beta_capture = parameters["beta_capture"]
+    theta_competition = parameters["theta_competition"]
     width = 900
     height = 330
     left = 58
@@ -418,7 +479,9 @@ def svg_capture_curve_korean() -> str:
     for competitor, color in zip(competitors, colors, strict=False):
         points = []
         for x in range(0, 81):
-            points.append(f"{sx(x):.1f},{sy(demand_capture(120, x, competitor)):.1f}")
+            points.append(
+                f"{sx(x):.1f},{sy(demand_capture(120, x, competitor, beta_capture, theta_competition)):.1f}"
+            )
         parts.append(f'<polyline points="{" ".join(points)}" fill="none" stroke="{color}" stroke-width="3"></polyline>')
     for idx, (competitor, color) in enumerate(zip(competitors, colors, strict=False)):
         y = 52 + idx * 23
@@ -428,14 +491,15 @@ def svg_capture_curve_korean() -> str:
     return "\n".join(parts)
 
 
-def capture_curve_panel() -> str:
+def capture_curve_panel(model_parameters: dict[str, float] | None = None) -> str:
+    parameters = coerce_model_parameters(model_parameters)
     return f"""
       <h2>Non-linear demand capture 해석</h2>
       <p>
         이 그래프는 Solver 안의 수요식 <code>Q_i(x_i)</code>가 어떤 모양인지 보여줍니다.
         핵심은 PM을 더 많이 놓을수록 기대 ride는 증가하지만, 추가 1대가 만드는 효과는 점점 작아진다는 점입니다.
       </p>
-      {svg_capture_curve_korean()}
+      {svg_capture_curve_korean(parameters)}
       <div class="equation" style="margin-top:12px;">
         <b>그래프에 쓰인 수요식</b>
         <div class="math">\\[Q_i(x_i)=\\min\\left\\{{A_i\\left(1-e^{{-\\frac{{\\beta x_i}}{{1+\\theta C_i}}}}\\right),\\;Ux_i\\right\\}}\\]</div>
@@ -470,8 +534,8 @@ def capture_curve_panel() -> str:
             <tr><td>\\(A_i\\)</td><td>120 rides로 고정</td><td>그래프 비교를 쉽게 하기 위해 zone의 보정 잠재수요를 같은 값으로 둠</td></tr>
             <tr><td>\\(x_i\\)</td><td>0대부터 80대까지 변화</td><td>04:00에 해당 zone에 배치하는 GBIKE PM 수</td></tr>
             <tr><td>\\(C_i\\)</td><td>0, 10, 40, 100</td><td>ALPACA 경쟁 공급량이 커질수록 GBIKE capture curve가 아래로 내려감</td></tr>
-            <tr><td>\\(\\beta\\)</td><td>{fmt_float(BETA_CAPTURE, 2)}</td><td>배치량 증가가 수요 capture로 전환되는 속도</td></tr>
-            <tr><td>\\(\\theta\\)</td><td>{fmt_float(THETA_COMPETITION, 2)}</td><td>경쟁 공급량이 GBIKE capture를 약화시키는 강도</td></tr>
+            <tr><td>\\(\\beta\\)</td><td>{fmt_float(parameters["beta_capture"], 2)}</td><td>배치량 증가가 수요 capture로 전환되는 속도</td></tr>
+            <tr><td>\\(\\theta\\)</td><td>{fmt_float(parameters["theta_competition"], 2)}</td><td>경쟁 공급량이 GBIKE capture를 약화시키는 강도</td></tr>
             <tr><td>\\(U\\)</td><td>{fmt_float(U_MAX_RIDES, 1)} rides/device/day</td><td>PM 1대가 하루 처리할 수 있는 최대 ride 수</td></tr>
           </tbody>
         </table>
@@ -1197,14 +1261,18 @@ def score_inventory_against_demands(rows: pd.DataFrame, demand_events: list[dict
     }
 
 
-def parameter_starting_points(trial_count: int = PARAMETER_SEARCH_TRIALS) -> list[dict[str, Any]]:
+def parameter_starting_points(
+    trial_count: int = PARAMETER_SEARCH_TRIALS,
+    model_parameters: dict[str, float] | None = None,
+) -> list[dict[str, Any]]:
     trial_count = max(1, int(trial_count))
+    parameters = coerce_model_parameters(model_parameters)
     starts = [
         {
             "trial": 1,
-            "lambda_market": float(LAMBDA_MARKET),
-            "beta_capture": float(BETA_CAPTURE),
-            "theta_competition": float(THETA_COMPETITION),
+            "lambda_market": parameters["lambda_market"],
+            "beta_capture": parameters["beta_capture"],
+            "theta_competition": parameters["theta_competition"],
             "source": "current_dashboard_value",
         }
     ]
@@ -1312,6 +1380,7 @@ def parameter_search_plan(
 
 
 CompactDemandScenario = tuple[tuple[int, tuple[tuple[str, int, tuple[tuple[str, int], ...]], ...]], ...]
+ParameterSearchProgressCallback = Callable[[dict[str, Any]], None]
 
 _PARAMETER_WORKER_BASE_MODEL: pd.DataFrame | None = None
 _PARAMETER_WORKER_DEMAND_SCENARIOS: list[CompactDemandScenario] | None = None
@@ -1513,6 +1582,23 @@ def evaluate_parameter_search_candidate(candidate: tuple[float, float, float]) -
     }
 
 
+def evaluate_parameter_search_candidate_batch(
+    candidates: tuple[tuple[float, float, float], ...],
+) -> list[dict[str, Any]]:
+    return [evaluate_parameter_search_candidate(candidate) for candidate in candidates]
+
+
+def chunked_parameter_grid(
+    candidates: list[tuple[float, float, float]],
+    chunk_size: int,
+) -> list[tuple[tuple[float, float, float], ...]]:
+    chunk_size = max(1, int(chunk_size))
+    return [
+        tuple(candidates[idx : idx + chunk_size])
+        for idx in range(0, len(candidates), chunk_size)
+    ]
+
+
 def run_parameter_search(
     processed_dir: Path,
     trial_count: int = PARAMETER_SEARCH_TRIALS,
@@ -1522,8 +1608,11 @@ def run_parameter_search(
     *,
     allow_long_run: bool = True,
     max_workers: int | None = None,
+    progress_callback: ParameterSearchProgressCallback | None = None,
+    model_parameters: dict[str, float] | None = None,
 ) -> dict[str, Any]:
     trial_count = max(1, int(trial_count))
+    active_parameters = coerce_model_parameters(model_parameters)
     plan = parameter_search_plan(trial_count, lambda_step, beta_step, theta_step, max_workers)
     if not allow_long_run:
         return {
@@ -1543,12 +1632,66 @@ def run_parameter_search(
             **plan,
         }
 
-    base_model, meta = build_zone_model(processed_dir, LAMBDA_MARKET)
+    started_monotonic = time.monotonic()
+
+    def emit_progress(
+        *,
+        phase: str,
+        completed_combinations: int = 0,
+        status: str = "running",
+        message: str = "",
+    ) -> None:
+        if progress_callback is None:
+            return
+        completed_combinations = max(0, min(int(completed_combinations), int(plan["parameter_combination_count"])))
+        completed_cases = int(completed_combinations * trial_count)
+        elapsed_seconds = max(0.0, time.monotonic() - started_monotonic)
+        case_count = int(plan["case_count"])
+        progress_ratio = completed_cases / case_count if case_count > 0 else 0.0
+        actual_cases_per_second = completed_cases / elapsed_seconds if elapsed_seconds > 0 and completed_cases > 0 else 0.0
+        remaining_cases = max(0, case_count - completed_cases)
+        estimated_remaining_seconds = (
+            remaining_cases / actual_cases_per_second if actual_cases_per_second > 0 else None
+        )
+        progress_callback(
+            {
+                "ok": True,
+                "status": status,
+                "phase": phase,
+                "message": message,
+                "trial_count": int(trial_count),
+                "trials_per_parameter_combination": int(trial_count),
+                "parameter_combination_count": int(plan["parameter_combination_count"]),
+                "completed_parameter_combinations": int(completed_combinations),
+                "remaining_parameter_combinations": int(
+                    max(0, int(plan["parameter_combination_count"]) - completed_combinations)
+                ),
+                "case_count": case_count,
+                "completed_cases": completed_cases,
+                "remaining_cases": remaining_cases,
+                "progress_ratio": float(progress_ratio),
+                "progress_percent": float(progress_ratio * 100.0),
+                "elapsed_seconds": float(elapsed_seconds),
+                "actual_cases_per_second": float(actual_cases_per_second),
+                "estimated_remaining_seconds": estimated_remaining_seconds,
+                "estimated_total_seconds": (
+                    elapsed_seconds + estimated_remaining_seconds
+                    if estimated_remaining_seconds is not None
+                    else None
+                ),
+                "worker_count": int(plan["worker_count"]),
+                "reserved_cpu_cores": int(plan["reserved_cpu_cores"]),
+                "parallel_strategy": str(plan["parallel_strategy"]),
+            }
+        )
+
+    emit_progress(phase="preparing", message="zone model과 fixed demand scenarios를 준비하고 있습니다.")
+    base_model, meta = build_zone_model(processed_dir, active_parameters["lambda_market"])
     baseline_rows, baseline_solution = optimize_dashboard_solution(
         base_model,
         OPTIMIZATION_FLEET,
-        BETA_CAPTURE,
-        THETA_COMPETITION,
+        active_parameters["beta_capture"],
+        active_parameters["theta_competition"],
     )
     segments = load_clean_temporal_segments(processed_dir)
     rate_rows, rate_meta = fit_temporal_od_rates(segments)
@@ -1564,6 +1707,7 @@ def run_parameter_search(
         demand_scenarios.append(compact_demand_scenario(demand_events))
         demand_event_counts.append(len(demand_events))
         demand_meta_rows.append(demand_meta)
+    emit_progress(phase="baseline", message="baseline P* simulation score를 계산하고 있습니다.")
     baseline_scores = [
         score_inventory_against_compact_demands(baseline_rows, scenario)
         for scenario in demand_scenarios
@@ -1580,32 +1724,43 @@ def run_parameter_search(
     ]
     worker_count = parameter_search_worker_count(max_workers)
     results: list[dict[str, Any]] = []
+    completed_combinations = 0
+    emit_progress(phase="evaluating", message="parameter 조합 평가를 시작했습니다.")
     if worker_count <= 1:
         init_parameter_search_worker(base_model, demand_scenarios)
         for idx, candidate in enumerate(candidate_grid, start=1):
             results.append(evaluate_parameter_search_candidate(candidate))
+            completed_combinations = idx
+            if idx == 1 or idx % 25 == 0 or idx == parameter_combination_count:
+                emit_progress(phase="evaluating", completed_combinations=completed_combinations)
             if idx % 500 == 0:
                 gc.collect()
     else:
         context = multiprocessing.get_context("spawn")
+        candidate_chunks = chunked_parameter_grid(candidate_grid, PARAMETER_SEARCH_CHUNK_SIZE)
         with ProcessPoolExecutor(
             max_workers=worker_count,
             mp_context=context,
             initializer=init_parameter_search_worker,
             initargs=(base_model, demand_scenarios),
         ) as executor:
-            for idx, result in enumerate(
-                executor.map(
-                    evaluate_parameter_search_candidate,
-                    candidate_grid,
-                    chunksize=PARAMETER_SEARCH_CHUNK_SIZE,
-                ),
-                start=1,
-            ):
-                results.append(result)
-                if idx % 500 == 0:
+            futures = [
+                executor.submit(evaluate_parameter_search_candidate_batch, chunk)
+                for chunk in candidate_chunks
+            ]
+            for future in as_completed(futures):
+                chunk_results = future.result()
+                results.extend(chunk_results)
+                completed_combinations += len(chunk_results)
+                emit_progress(phase="evaluating", completed_combinations=completed_combinations)
+                if completed_combinations % 500 < PARAMETER_SEARCH_CHUNK_SIZE:
                     gc.collect()
 
+    emit_progress(
+        phase="ranking",
+        completed_combinations=parameter_combination_count,
+        message="결과를 unmet rides 기준으로 정렬하고 있습니다.",
+    )
     results.sort(
         key=lambda item: (
             float(item["avg_unmet_rides"]),
@@ -1616,6 +1771,16 @@ def run_parameter_search(
     )
     ranked_results = [{**item, "rank": rank} for rank, item in enumerate(results, start=1)]
     best = ranked_results[0] if ranked_results else {}
+    total_elapsed_seconds = max(0.0, time.monotonic() - started_monotonic)
+    actual_cases_per_second = (
+        float(plan["case_count"]) / total_elapsed_seconds if total_elapsed_seconds > 0 else 0.0
+    )
+    emit_progress(
+        phase="complete",
+        completed_combinations=parameter_combination_count,
+        status="complete",
+        message="parameter calibration simulation이 완료되었습니다.",
+    )
 
     return {
         "ok": True,
@@ -1631,6 +1796,8 @@ def run_parameter_search(
         "estimated_runtime_hours": plan["estimated_runtime_hours"],
         "estimated_parallel_runtime_seconds": plan["estimated_parallel_runtime_seconds"],
         "estimated_parallel_runtime_hours": plan["estimated_parallel_runtime_hours"],
+        "elapsed_seconds": float(total_elapsed_seconds),
+        "actual_cases_per_second": float(actual_cases_per_second),
         "observed_seconds_per_case": plan["observed_seconds_per_case"],
         "cpu_count": plan["cpu_count"],
         "reserved_cpu_cores": plan["reserved_cpu_cores"],
@@ -1659,9 +1826,9 @@ def run_parameter_search(
             "theta_competition": len(thetas),
         },
         "baseline_parameters": {
-            "lambda_market": LAMBDA_MARKET,
-            "beta_capture": BETA_CAPTURE,
-            "theta_competition": THETA_COMPETITION,
+            "lambda_market": active_parameters["lambda_market"],
+            "beta_capture": active_parameters["beta_capture"],
+            "theta_competition": active_parameters["theta_competition"],
         },
         "baseline_solution": baseline_solution,
         "baseline_score": baseline_score,
@@ -2031,7 +2198,6 @@ def render_temporal_inventory_map(temporal: dict[str, Any], out_path: Path) -> N
     Fullscreen(position="topright").add_to(m)
     folium.LayerControl(collapsed=False).add_to(m)
     m.save(str(out_path))
-    inject_hermes_widget(out_path)
 
 
 def temporal_simulation_panel(temporal: dict[str, Any], map_href: str) -> str:
@@ -2097,7 +2263,13 @@ def temporal_simulation_panel(temporal: dict[str, Any], map_href: str) -> str:
     """
 
 
-def parameter_search_panel() -> str:
+def parameter_search_panel(
+    model_parameters: dict[str, float] | None = None,
+    parameter_state: dict[str, Any] | None = None,
+) -> str:
+    active_parameters = coerce_model_parameters(model_parameters)
+    source = (parameter_state or {}).get("source", "default")
+    source_label = "approved calibration" if source == "approved" else "code default"
     plan = parameter_search_plan(
         PARAMETER_SEARCH_TRIALS,
         PARAMETER_SEARCH_LAMBDA_STEP,
@@ -2110,8 +2282,10 @@ def parameter_search_panel() -> str:
     return f"""
       <h2>상수 Calibration Simulation: λ, β, θ Multi-start Search</h2>
       <p>
-        현재 dashboard의 <code>λ={fmt_float(LAMBDA_MARKET, 2)}</code>, <code>β={fmt_float(BETA_CAPTURE, 2)}</code>,
-        <code>θ={fmt_float(THETA_COMPETITION, 2)}</code>는 설명용 baseline입니다. λ, β, θ grid 조합
+        현재 dashboard의 <code>λ={fmt_float(active_parameters["lambda_market"], 2)}</code>,
+        <code>β={fmt_float(active_parameters["beta_capture"], 2)}</code>,
+        <code>θ={fmt_float(active_parameters["theta_competition"], 2)}</code>는
+        <code>{safe(source_label)}</code> 기준 baseline입니다. λ, β, θ grid 조합
         {fmt_int(parameter_combination_count)}개와 조합별 {fmt_int(PARAMETER_SEARCH_TRIALS)}개 demand trial을 모두 곱하면
         총 {fmt_int(case_count)} case입니다. Full-run은 현재 machine의 {fmt_int(plan["cpu_count"])}개 CPU 중
         cron scheduler용 {fmt_int(plan["reserved_cpu_cores"])}개를 남기고 {fmt_int(plan["worker_count"])}개 worker로 병렬 실행합니다.
@@ -2136,9 +2310,19 @@ def parameter_search_panel() -> str:
       </div>
       <div class="action-row">
         <button class="primary-button" type="button" id="parameter-search-start">Full-run 시뮬레이션 시작하기</button>
-        <span class="loading-pill" id="parameter-search-loading"><span class="spinner"></span>{fmt_int(plan["worker_count"])} worker로 {fmt_int(case_count)} case를 병렬 평가 중입니다. 완료 전까지 추가 request는 막힙니다.</span>
+        <span class="loading-pill" id="parameter-search-loading"><span class="spinner"></span>{fmt_int(plan["worker_count"])} worker로 {fmt_int(case_count)} case를 병렬 평가 중입니다. 실제 progress 기준 ETA를 갱신합니다.</span>
       </div>
       <div class="status-box" id="parameter-search-status">아직 실행하지 않았습니다. Full-run은 완료될 때까지 browser request가 열린 상태로 유지됩니다.</div>
+      <div class="progress-panel" id="parameter-search-progress-panel">
+        <div class="progress-meta">
+          <span id="parameter-search-progress-label">0.0% · 0 / {fmt_int(parameter_combination_count)} parameter 조합</span>
+          <span id="parameter-search-eta-label">ETA 계산 대기 중</span>
+        </div>
+        <div class="progress-track" aria-label="parameter calibration progress">
+          <div class="progress-fill" id="parameter-search-progress-fill"></div>
+        </div>
+        <div class="progress-detail" id="parameter-search-progress-detail">실제 완료된 case 수를 기준으로 ETA를 계산합니다.</div>
+      </div>
       <div id="parameter-search-result"></div>
       <script>
       (() => {{
@@ -2146,13 +2330,30 @@ def parameter_search_panel() -> str:
         const loading = document.getElementById("parameter-search-loading");
         const status = document.getElementById("parameter-search-status");
         const result = document.getElementById("parameter-search-result");
+        const progressPanel = document.getElementById("parameter-search-progress-panel");
+        const progressFill = document.getElementById("parameter-search-progress-fill");
+        const progressLabel = document.getElementById("parameter-search-progress-label");
+        const etaLabel = document.getElementById("parameter-search-eta-label");
+        const progressDetail = document.getElementById("parameter-search-progress-detail");
         let running = false;
+        let mainRequestActive = false;
+        let progressTimer = null;
 
         const fmtInt = value => Math.round(Number(value || 0)).toLocaleString();
         const fmtFloat = (value, digits = 2) => Number(value || 0).toLocaleString(undefined, {{
           minimumFractionDigits: digits,
           maximumFractionDigits: digits,
         }});
+        const fmtDuration = seconds => {{
+          if (seconds === null || seconds === undefined || !Number.isFinite(Number(seconds))) return "계산 중";
+          const total = Math.max(0, Math.round(Number(seconds)));
+          const hours = Math.floor(total / 3600);
+          const minutes = Math.floor((total % 3600) / 60);
+          const secs = total % 60;
+          if (hours > 0) return `${{hours}}시간 ${{String(minutes).padStart(2, "0")}}분`;
+          if (minutes > 0) return `${{minutes}}분 ${{String(secs).padStart(2, "0")}}초`;
+          return `${{secs}}초`;
+        }};
         const setRunning = value => {{
           running = value;
           if (button) button.disabled = value;
@@ -2162,6 +2363,62 @@ def parameter_search_panel() -> str:
           if (!status) return;
           status.textContent = message;
           status.classList.toggle("error", isError);
+        }};
+        const renderProgress = data => {{
+          if (!progressPanel) return;
+          progressPanel.classList.add("active");
+          const percent = Math.max(0, Math.min(100, Number(data.progress_percent || 0)));
+          const completedCombos = Number(data.completed_parameter_combinations || 0);
+          const totalCombos = Number(data.parameter_combination_count || {parameter_combination_count});
+          const completedCases = Number(data.completed_cases || 0);
+          const totalCases = Number(data.case_count || {case_count});
+          const rate = Number(data.actual_cases_per_second || 0);
+          if (progressFill) progressFill.style.width = `${{percent.toFixed(2)}}%`;
+          if (progressLabel) progressLabel.textContent = `${{percent.toFixed(2)}}% · ${{fmtInt(completedCombos)}} / ${{fmtInt(totalCombos)}} parameter 조합`;
+          if (etaLabel) etaLabel.textContent = data.status === "complete"
+            ? "완료"
+            : `ETA ${{fmtDuration(data.estimated_remaining_seconds)}}`;
+          if (progressDetail) {{
+            progressDetail.textContent = `완료 case ${{fmtInt(completedCases)}} / ${{fmtInt(totalCases)}} · 실제 처리속도 ${{fmtFloat(rate, 1)}} cases/s · 경과 ${{fmtDuration(data.elapsed_seconds)}}`;
+          }}
+          if (running && data.status === "running") {{
+            const phase = data.phase ? ` · ${{data.phase}}` : "";
+            setStatus(`진행 중${{phase}}: ${{fmtFloat(percent, 2)}}% 완료. 실제 속도 기준 ETA ${{fmtDuration(data.estimated_remaining_seconds)}}.`);
+          }}
+        }};
+        const pollProgress = async () => {{
+          try {{
+            const response = await fetch("./api/parameter-search-progress", {{ cache: "no-store" }});
+            if (!response.ok) return null;
+            const data = await response.json();
+            if (data && data.ok !== false) {{
+              renderProgress(data);
+              if (running && !mainRequestActive && data.status && data.status !== "running") {{
+                if (progressTimer) clearInterval(progressTimer);
+                progressTimer = null;
+                setRunning(false);
+                if (data.status === "complete") {{
+                  setStatus("Full-run 완료: 결과는 parameter_search_results.json에 저장되었습니다. 필요하면 이 페이지를 새로고침해 최신 결과를 확인하세요.");
+                }} else if (data.status === "failed") {{
+                  setStatus(`Full-run 실패: ${{data.message || "원인을 확인할 수 없습니다."}}`, true);
+                }}
+              }}
+              return data;
+            }}
+          }} catch (_error) {{
+            // Progress polling is best-effort; the main full-run request remains authoritative.
+          }}
+          return null;
+        }};
+        const startProgressPolling = () => {{
+          if (progressTimer) clearInterval(progressTimer);
+          pollProgress();
+          progressTimer = setInterval(pollProgress, 1000);
+        }};
+        const stopProgressPolling = () => {{
+          if (progressTimer) clearInterval(progressTimer);
+          progressTimer = null;
+          pollProgress();
         }};
         const renderResults = data => {{
           const best = data.best || {{}};
@@ -2189,6 +2446,11 @@ def parameter_search_panel() -> str:
               <div class="metric"><div class="label">Total cases</div><div class="value">${{fmtInt(data.case_count)}}</div></div>
               <div class="metric"><div class="label">Workers</div><div class="value">${{fmtInt(data.worker_count)}}</div></div>
             </div>
+            <div class="action-row">
+              <button class="primary-button" type="button" id="apply-best-constants">이 최적값 반영하기</button>
+              <span class="apply-note">(5분 내로 재계산 시 반영됩니다)</span>
+            </div>
+            <div class="status-box" id="apply-best-constants-status">아직 반영 요청하지 않았습니다.</div>
             <div class="table-wrap compact-table sim-table">
               <table>
                 <thead>
@@ -2198,13 +2460,56 @@ def parameter_search_panel() -> str:
               </table>
             </div>
           `;
+          const applyButton = document.getElementById("apply-best-constants");
+          const applyStatus = document.getElementById("apply-best-constants-status");
+          if (applyButton) applyButton.addEventListener("click", async () => {{
+            applyButton.disabled = true;
+            if (applyStatus) {{
+              applyStatus.textContent = "최적 상수를 저장하고 있습니다. 5분 내로 재계산 시 반영됩니다.";
+              applyStatus.classList.remove("error");
+            }}
+            try {{
+              const response = await fetch("./api/apply-best-constants", {{
+                method: "POST",
+                headers: {{ "Content-Type": "application/json" }},
+                body: JSON.stringify({{ best }}),
+              }});
+              const applyData = await response.json().catch(() => ({{ ok: false, error: "Invalid JSON response" }}));
+              if (!response.ok || !applyData.ok) {{
+                throw new Error(applyData.error || "최적 상수를 저장하지 못했습니다.");
+              }}
+              if (applyStatus) {{
+                applyStatus.textContent = `반영 예약 완료: λ=${{fmtFloat(applyData.parameters.lambda_market, 3)}}, β=${{fmtFloat(applyData.parameters.beta_capture, 3)}}, θ=${{fmtFloat(applyData.parameters.theta_competition, 3)}}. 5분 내로 재계산 시 반영됩니다.`;
+              }}
+            }} catch (error) {{
+              if (applyStatus) {{
+                applyStatus.textContent = `반영 실패: ${{error.message}}`;
+                applyStatus.classList.add("error");
+              }}
+              applyButton.disabled = false;
+            }}
+          }});
+        }};
+
+        const resumeRunningProgress = async () => {{
+          const data = await pollProgress();
+          if (!data || data.status !== "running") return;
+          setRunning(true);
+          if (progressPanel) progressPanel.classList.add("active");
+          const percent = Number(data.progress_percent || 0);
+          setStatus(`이미 실행 중인 Full-run을 감지했습니다. 진행률 ${{fmtFloat(percent, 2)}}%부터 계속 표시합니다.`);
+          startProgressPolling();
         }};
 
         if (button) button.addEventListener("click", async () => {{
           if (running) return;
           setRunning(true);
+          mainRequestActive = true;
           result.innerHTML = "";
+          if (progressPanel) progressPanel.classList.add("active");
+          if (progressFill) progressFill.style.width = "0%";
           setStatus("Full-run request submitted. 서버에서 parameter 조합을 worker pool로 나눠 계산하고 있습니다.");
+          startProgressPolling();
           try {{
             const response = await fetch("./api/parameter-search", {{
               method: "POST",
@@ -2227,16 +2532,31 @@ def parameter_search_panel() -> str:
               return;
             }}
             renderResults(data);
+            renderProgress({{
+              ok: true,
+              status: "complete",
+              progress_percent: 100,
+              completed_parameter_combinations: data.parameter_combination_count,
+              parameter_combination_count: data.parameter_combination_count,
+              completed_cases: data.case_count,
+              case_count: data.case_count,
+              actual_cases_per_second: data.actual_cases_per_second,
+              elapsed_seconds: data.elapsed_seconds,
+              estimated_remaining_seconds: 0
+            }});
             setStatus(`완료: ${{data.parameter_combination_count.toLocaleString()}}개 parameter 조합 × ${{data.trials_per_parameter_combination.toLocaleString()}}개 trial = ${{data.case_count.toLocaleString()}} case를 ${{data.worker_count.toLocaleString()}} worker로 평가했습니다.`);
           }} catch (error) {{
             setStatus(`Simulation request 실패: ${{error.message}}`, true);
           }} finally {{
+            mainRequestActive = false;
+            stopProgressPolling();
             setRunning(false);
           }}
         }});
+        resumeRunningProgress();
       }})();
       </script>
-    """
+    """.rstrip()
 
 
 def decision_variable_table() -> str:
@@ -2265,12 +2585,19 @@ def constraints_table(fleet_size: int) -> str:
     return f"<table><thead><tr><th>Constraint</th><th>식</th><th>이유</th></tr></thead><tbody>{body}</tbody></table>"
 
 
-def static_parameter_table(fleet_size: int) -> str:
+def static_parameter_table(
+    fleet_size: int,
+    model_parameters: dict[str, float] | None = None,
+    parameter_state: dict[str, Any] | None = None,
+) -> str:
+    parameters = coerce_model_parameters(model_parameters)
+    source = (parameter_state or {}).get("source", "default")
+    source_label = "approved calibration" if source == "approved" else "code default"
     rows = [
         (r"\(F\)", fmt_int(fleet_size), "이번 run에서 배치할 전체 GBIKE PM 수"),
-        (r"\(\lambda\)", fmt_float(LAMBDA_MARKET, 2), "경쟁사 존재를 market validation으로 반영하는 강도"),
-        (r"\(\beta\)", fmt_float(BETA_CAPTURE, 2), "GBIKE 배치량이 수요 capture로 전환되는 속도"),
-        (r"\(\theta\)", fmt_float(THETA_COMPETITION, 2), "ALPACA 공급량이 GBIKE capture를 약화시키는 정도"),
+        (r"\(\lambda\)", fmt_float(parameters["lambda_market"], 2), "경쟁사 존재를 market validation으로 반영하는 강도"),
+        (r"\(\beta\)", fmt_float(parameters["beta_capture"], 2), "GBIKE 배치량이 수요 capture로 전환되는 속도"),
+        (r"\(\theta\)", fmt_float(parameters["theta_competition"], 2), "ALPACA 공급량이 GBIKE capture를 약화시키는 정도"),
         (r"\(U\)", fmt_float(U_MAX_RIDES, 1), "PM 1대가 하루 처리 가능한 최대 ride 수"),
         (r"\(p_i\)", f"{fmt_int(REVENUE_PER_RIDE_KRW)} KRW", "현재 dashboard에서는 zone 공통 ride 1건 평균 매출로 둠"),
         (r"\(v\)", f"{fmt_int(VARIABLE_COST_KRW)} KRW", "ride 1건당 변동비"),
@@ -2278,6 +2605,9 @@ def static_parameter_table(fleet_size: int) -> str:
         (r"\(\rho\)", f"{fmt_int(REBALANCING_KRW_PER_KM)} KRW/km", "재배치 거리 1km당 비용"),
         (r"\(\kappa\)", fmt_float(CAPACITY_MULTIPLIER, 2), r"\(K_i\) 계산에 쓰는 zone capacity multiplier"),
     ]
+    rows.append(("source", source_label, "λ/β/θ 값의 출처"))
+    if (parameter_state or {}).get("approved_at"):
+        rows.append(("approved_at", str(parameter_state["approved_at"]), "승인된 calibration 상수 저장 시각"))
     body = "".join(
         f'<tr><td class="math-cell">{symbol}</td><td>{safe(value)}</td><td>{safe(note)}</td></tr>'
         for symbol, value, note in rows
@@ -2384,7 +2714,6 @@ def render_model_map(rows: pd.DataFrame, out_path: Path) -> None:
     Fullscreen(position="topright").add_to(m)
     folium.LayerControl(collapsed=False).add_to(m)
     m.save(str(out_path))
-    inject_hermes_widget(out_path)
 
 
 def render_html(
@@ -2394,6 +2723,8 @@ def render_html(
     temporal: dict[str, Any],
     temporal_map_href: str,
     out_path: Path,
+    model_parameters: dict[str, float],
+    parameter_state: dict[str, Any],
 ) -> None:
     active_rows = rows[rows["x_star"] > 0]
     best_zone = str(active_rows.iloc[0]["zone_id"]) if not active_rows.empty else "n/a"
@@ -2463,12 +2794,19 @@ def render_html(
     .action-row {{ display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-top: 14px; }}
     .primary-button {{ border: 1px solid var(--green); background: var(--green); color: #fff; border-radius: 8px; padding: 10px 14px; font-weight: 800; cursor: pointer; }}
     .primary-button[disabled] {{ cursor: not-allowed; opacity: .58; }}
+    .apply-note {{ color: var(--muted); font-size: 13px; font-weight: 700; }}
     .loading-pill {{ display: none; align-items: center; gap: 8px; color: var(--muted); font-size: 13px; }}
     .loading-pill.active {{ display: inline-flex; }}
     .spinner {{ width: 16px; height: 16px; border: 2px solid #cbd5e1; border-top-color: var(--green); border-radius: 999px; animation: spin .8s linear infinite; }}
     @keyframes spin {{ to {{ transform: rotate(360deg); }} }}
     .status-box {{ margin-top: 12px; border: 1px solid var(--line); border-radius: 8px; background: #f8fafc; padding: 12px 13px; color: var(--muted); font-size: 13px; line-height: 1.55; }}
     .status-box.error {{ border-color: #fecdd3; background: #fff1f2; color: #9f1239; }}
+    .progress-panel {{ display: none; margin-top: 10px; border: 1px solid var(--line); border-radius: 8px; background: #ffffff; padding: 11px 12px; }}
+    .progress-panel.active {{ display: block; }}
+    .progress-meta {{ display: flex; justify-content: space-between; gap: 12px; color: var(--ink); font-size: 13px; font-weight: 800; }}
+    .progress-track {{ height: 10px; margin-top: 8px; border-radius: 999px; background: #e2e8f0; overflow: hidden; }}
+    .progress-fill {{ width: 0%; height: 100%; border-radius: inherit; background: linear-gradient(90deg, var(--green), #2563eb); transition: width .35s ease; }}
+    .progress-detail {{ margin-top: 8px; color: var(--muted); font-size: 12px; }}
     .temporal-map-frame {{ width: 100%; height: 720px; border: 1px solid var(--line); border-radius: 8px; background: #fff; margin-top: 16px; }}
     table {{ width: 100%; border-collapse: collapse; font-size: 13px; }}
     th, td {{ border-bottom: 1px solid var(--line); padding: 9px 8px; text-align: right; vertical-align: top; }}
@@ -2547,7 +2885,7 @@ def render_html(
         <h3 style="margin-top:16px;">Constraints</h3>
         <div class="table-wrap compact-table" style="max-height:none;">{constraints_table(OPTIMIZATION_FLEET)}</div>
         <h3 style="margin-top:16px;">Static Parameters 현재 설정값</h3>
-        <div class="table-wrap compact-table" style="max-height:none;">{static_parameter_table(OPTIMIZATION_FLEET)}</div>
+        <div class="table-wrap compact-table" style="max-height:none;">{static_parameter_table(OPTIMIZATION_FLEET, model_parameters, parameter_state)}</div>
         <h3 style="margin-top:16px;">Data-derived Parameters 데이터에서 계산되는 값</h3>
         <div class="table-wrap compact-table" style="max-height:none;">{data_parameter_table()}</div>
         <div class="equation-note" style="margin-top:10px;">
@@ -2582,7 +2920,7 @@ def render_html(
     </section>
 
     <section class="grid two" style="margin-top:16px;">
-      <div class="card">{capture_curve_panel()}</div>
+      <div class="card">{capture_curve_panel(model_parameters)}</div>
       <div class="card">{simulation_panel(rows)}</div>
     </section>
 
@@ -2593,11 +2931,11 @@ def render_html(
     </section>
 
     <section class="card result" style="margin-top:16px;">
-      {temporal_simulation_panel(temporal, temporal_map_href)}
+{temporal_simulation_panel(temporal, temporal_map_href)}
     </section>
 
     <section class="card result" style="margin-top:16px;">
-      {parameter_search_panel()}
+{parameter_search_panel(model_parameters, parameter_state)}
     </section>
   </main>
 </body>
@@ -2611,11 +2949,53 @@ def mirror_html(src_path: Path, dst_path: Path) -> None:
     dst_path.write_text(src_path.read_text(encoding="utf-8"), encoding="utf-8")
 
 
+def render_lab_shell(out_path: Path) -> None:
+    html_text = """<!doctype html>
+<html lang="ko" data-hermes-mode="lab" data-hermes-sidebar="true">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>실험실</title>
+</head>
+<body class="hermes-lab-shell" data-hermes-mode="lab" data-hermes-sidebar="true" data-hermes-auto-open="true">
+  <header class="hermes-lab-header">
+    <h1 class="hermes-lab-title">실험실</h1>
+    <div class="hermes-lab-actions">
+      <button type="button" data-hermes-lab-init>준비</button>
+      <button type="button" class="primary" data-hermes-lab-save>상태 저장</button>
+      <button type="button" data-hermes-lab-revert>되돌리기</button>
+      <button type="button" data-hermes-lab-refresh>새로고침</button>
+      <span data-hermes-lab-status></span>
+    </div>
+  </header>
+  <iframe
+    class="hermes-lab-frame"
+    data-hermes-lab-frame
+    src="./hermes_lab_workspace/optimization_model.html"
+    title="실험실 모델">
+  </iframe>
+  <script>
+    window.HERMES_AGENT_MODE = "lab";
+  </script>
+  <script defer src="./hermes_widget.js"></script>
+</body>
+</html>
+"""
+    out_path.write_text(html_text, encoding="utf-8")
+
+
 def render(processed_dir: Path, out_dir: Path) -> dict[str, Any]:
     out_dir = ensure_dir(out_dir)
-    model, meta = build_zone_model(processed_dir)
+    parameter_state = read_approved_model_parameters(out_dir)
+    model_parameters = coerce_model_parameters(parameter_state.get("parameters"))
+    model, meta = build_zone_model(processed_dir, model_parameters["lambda_market"])
     fleet_size = OPTIMIZATION_FLEET
-    rows, solution = optimize_dashboard_solution(model, fleet_size)
+    rows, solution = optimize_dashboard_solution(
+        model,
+        fleet_size,
+        model_parameters["beta_capture"],
+        model_parameters["theta_competition"],
+    )
     temporal = build_temporal_inventory_simulation(rows, processed_dir)
     map_path = out_dir / "optimization_model_map.html"
     temporal_map_path = out_dir / "temporal_inventory_map.html"
@@ -2669,10 +3049,23 @@ def render(processed_dir: Path, out_dir: Path) -> dict[str, Any]:
     pd.DataFrame(temporal.get("movements", []), columns=movement_columns).to_csv(movement_path, index=False)
     render_model_map(rows, map_path)
     render_temporal_inventory_map(temporal, temporal_map_path)
-    render_html(rows, meta, solution, temporal, f"./{temporal_map_path.name}", page_path)
+    render_html(
+        rows,
+        meta,
+        solution,
+        temporal,
+        f"./{temporal_map_path.name}",
+        page_path,
+        model_parameters,
+        parameter_state,
+    )
     mirror_html(page_path, hermes_lab_path)
     payload = {
         "meta": meta,
+        "model_parameters": {
+            "parameters": model_parameters,
+            "state": parameter_state,
+        },
         "solution": solution,
         "temporal_inventory_simulation": {
             "summary": temporal.get("summary", {}),

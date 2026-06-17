@@ -60,8 +60,242 @@
     return button;
   }
 
+  function escapeHtml(value) {
+    return String(value || "")
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#39;");
+  }
+
+  function ensureMathJax() {
+    if (window.MathJax && window.MathJax.typesetPromise) return Promise.resolve();
+    if (window.__hermesMathJaxPromise) return window.__hermesMathJaxPromise;
+    window.MathJax = window.MathJax || {
+      tex: { inlineMath: [["\\(", "\\)"]], displayMath: [["\\[", "\\]"]] },
+      svg: { fontCache: "global" },
+    };
+    window.__hermesMathJaxPromise = new Promise((resolve, reject) => {
+      const script = document.createElement("script");
+      script.src = "https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-svg.js";
+      script.async = true;
+      script.onload = resolve;
+      script.onerror = reject;
+      document.head.appendChild(script);
+    });
+    return window.__hermesMathJaxPromise;
+  }
+
+  function scheduleMathTypeset(node) {
+    if (!node.querySelector(".hermes-math, .hermes-math-block")) return;
+    window.clearTimeout(node.__hermesMathTimer);
+    node.__hermesMathTimer = window.setTimeout(() => {
+      ensureMathJax()
+        .then(() => window.MathJax && window.MathJax.typesetPromise ? window.MathJax.typesetPromise([node]) : null)
+        .catch(() => {});
+    }, 80);
+  }
+
+  function renderInlineMarkdown(text) {
+    const slots = [];
+    const slot = (html) => {
+      const key = `\u0000${slots.length}\u0000`;
+      slots.push(html);
+      return key;
+    };
+    let source = String(text || "");
+    source = source.replace(/`([^`\n]+)`/g, (_match, code) => slot(`<code>${escapeHtml(code)}</code>`));
+    source = source.replace(/\\\((.+?)\\\)/g, (_match, math) => slot(`<span class="hermes-math">\\(${escapeHtml(math)}\\)</span>`));
+    source = source.replace(/\$([^$\n]+?)\$/g, (_match, math) => slot(`<span class="hermes-math">\\(${escapeHtml(math)}\\)</span>`));
+    let html = escapeHtml(source);
+    html = html.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
+    html = html.replace(/__([^_]+)__/g, "<strong>$1</strong>");
+    html = html.replace(/(^|[\s(])\*([^*\n]+)\*/g, "$1<em>$2</em>");
+    html = html.replace(/(^|[\s(])_([^_\n]+)_/g, "$1<em>$2</em>");
+    slots.forEach((value, index) => {
+      html = html.replaceAll(`\u0000${index}\u0000`, value);
+    });
+    return html;
+  }
+
+  function splitTableRow(row) {
+    return row.trim().replace(/^\|/, "").replace(/\|$/, "").split("|").map((cell) => cell.trim());
+  }
+
+  function isTableSeparator(row) {
+    return /^\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?$/.test(row.trim());
+  }
+
+  function renderMarkdown(markdown) {
+    const lines = String(markdown || "").replace(/\r\n/g, "\n").split("\n");
+    const out = [];
+    let paragraph = [];
+    let list = [];
+    let listType = "";
+    let quote = [];
+    let table = [];
+    let code = [];
+    let math = [];
+    let inCode = false;
+    let inMath = false;
+
+    function flushParagraph() {
+      if (!paragraph.length) return;
+      out.push(`<p>${renderInlineMarkdown(paragraph.join(" "))}</p>`);
+      paragraph = [];
+    }
+
+    function flushList() {
+      if (!list.length) return;
+      const tag = listType === "ol" ? "ol" : "ul";
+      out.push(`<${tag}>${list.map((item) => `<li>${renderInlineMarkdown(item)}</li>`).join("")}</${tag}>`);
+      list = [];
+      listType = "";
+    }
+
+    function flushQuote() {
+      if (!quote.length) return;
+      out.push(`<blockquote>${quote.map((line) => `<p>${renderInlineMarkdown(line)}</p>`).join("")}</blockquote>`);
+      quote = [];
+    }
+
+    function flushTable() {
+      if (!table.length) return;
+      if (table.length < 2 || !isTableSeparator(table[1])) {
+        paragraph.push(...table);
+        table = [];
+        return;
+      }
+      const headers = splitTableRow(table[0]);
+      const rows = table.slice(2).map(splitTableRow);
+      let html = '<div class="hermes-table-wrap"><table><thead><tr>';
+      html += headers.map((cell) => `<th>${renderInlineMarkdown(cell)}</th>`).join("");
+      html += "</tr></thead><tbody>";
+      html += rows.map((row) => `<tr>${row.map((cell) => `<td>${renderInlineMarkdown(cell)}</td>`).join("")}</tr>`).join("");
+      html += "</tbody></table></div>";
+      out.push(html);
+      table = [];
+    }
+
+    for (const line of lines) {
+      const trimmed = line.trim();
+
+      if (trimmed.startsWith("```")) {
+        if (inCode) {
+          out.push(`<pre><code>${escapeHtml(code.join("\n"))}</code></pre>`);
+          code = [];
+          inCode = false;
+        } else {
+          flushTable(); flushQuote(); flushList(); flushParagraph();
+          inCode = true;
+        }
+        continue;
+      }
+      if (inCode) {
+        code.push(line);
+        continue;
+      }
+
+      if (trimmed === "$$" || trimmed === "\\[" || trimmed === "\\]") {
+        if (inMath) {
+          out.push(`<div class="hermes-math-block">\\[${escapeHtml(math.join("\n"))}\\]</div>`);
+          math = [];
+          inMath = false;
+        } else if (trimmed !== "\\]") {
+          flushTable(); flushQuote(); flushList(); flushParagraph();
+          inMath = true;
+        }
+        continue;
+      }
+      if (inMath) {
+        math.push(line);
+        continue;
+      }
+      const oneLineMath = /^\$\$(.+)\$\$$/.exec(trimmed);
+      if (oneLineMath) {
+        flushTable(); flushQuote(); flushList(); flushParagraph();
+        out.push(`<div class="hermes-math-block">\\[${escapeHtml(oneLineMath[1].trim())}\\]</div>`);
+        continue;
+      }
+      const bracketMath = /^\\\[(.+)\\\]$/.exec(trimmed);
+      if (bracketMath) {
+        flushTable(); flushQuote(); flushList(); flushParagraph();
+        out.push(`<div class="hermes-math-block">\\[${escapeHtml(bracketMath[1].trim())}\\]</div>`);
+        continue;
+      }
+
+      if (!trimmed) {
+        flushTable(); flushQuote(); flushList(); flushParagraph();
+        continue;
+      }
+      if (/^(-{3,}|\*{3,})$/.test(trimmed)) {
+        flushTable(); flushQuote(); flushList(); flushParagraph();
+        out.push("<hr>");
+        continue;
+      }
+      if (trimmed.includes("|")) {
+        flushQuote(); flushList(); flushParagraph();
+        table.push(line);
+        continue;
+      }
+      const quoteMatch = /^>\s?(.*)$/.exec(trimmed);
+      if (quoteMatch) {
+        flushTable(); flushList(); flushParagraph();
+        quote.push(quoteMatch[1]);
+        continue;
+      }
+      const heading = /^(#{1,6})\s+(.+)$/.exec(trimmed);
+      if (heading) {
+        flushTable(); flushQuote(); flushList(); flushParagraph();
+        const level = Math.min(4, heading[1].length + 1);
+        out.push(`<h${level}>${renderInlineMarkdown(heading[2])}</h${level}>`);
+        continue;
+      }
+      const ordered = /^\d+\.\s+(.+)$/.exec(trimmed);
+      if (ordered) {
+        flushTable(); flushQuote(); flushParagraph();
+        if (listType && listType !== "ol") flushList();
+        listType = "ol";
+        list.push(ordered[1]);
+        continue;
+      }
+      const bullet = /^[-*]\s+(.+)$/.exec(trimmed);
+      if (bullet) {
+        flushTable(); flushQuote(); flushParagraph();
+        if (listType && listType !== "ul") flushList();
+        listType = "ul";
+        list.push(bullet[1]);
+        continue;
+      }
+      flushTable(); flushQuote(); flushList();
+      paragraph.push(line);
+    }
+
+    if (inCode) out.push(`<pre><code>${escapeHtml(code.join("\n"))}</code></pre>`);
+    if (inMath) out.push(`<div class="hermes-math-block">\\[${escapeHtml(math.join("\n"))}\\]</div>`);
+    flushTable();
+    flushQuote();
+    flushList();
+    flushParagraph();
+    return out.join("");
+  }
+
+  function setMessageContent(item, role, text) {
+    item.dataset.rawText = text || "";
+    if (role === "assistant") {
+      item.classList.add("rendered");
+      item.innerHTML = renderMarkdown(text || "");
+      scheduleMathTypeset(item);
+      return;
+    }
+    item.classList.remove("rendered");
+    item.textContent = text || "";
+  }
+
   function appendMessage(log, role, text) {
-    const item = el("div", `hermes-message ${role || ""}`.trim(), text);
+    const item = el("div", `hermes-message ${role || ""}`.trim());
+    setMessageContent(item, role, text || "");
     log.appendChild(item);
     log.scrollTop = log.scrollHeight;
     return item;
@@ -123,6 +357,9 @@
     const assistant = appendMessage(log, "assistant", "");
     sendButton.disabled = true;
     status.textContent = "응답 중";
+    let assistantHasAnswer = false;
+    let assistantText = "";
+    let finished = false;
 
     const sessionId = currentSessionId();
 
@@ -138,14 +375,13 @@
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
       let buffer = "";
-      let finished = false;
-      let assistantHasAnswer = false;
 
       function showAssistantStatus(text) {
         if (assistantHasAnswer) return;
         const next = (text || "처리 중").trim();
         if (!next) return;
         assistant.dataset.placeholder = "status";
+        assistant.classList.remove("rendered");
         assistant.textContent = next;
         log.scrollTop = log.scrollHeight;
       }
@@ -153,11 +389,11 @@
       function appendAssistantDelta(text) {
         if (!text) return;
         if (!assistantHasAnswer) {
-          assistant.textContent = "";
           assistantHasAnswer = true;
           delete assistant.dataset.placeholder;
         }
-        assistant.textContent += text;
+        assistantText += text;
+        setMessageContent(assistant, "assistant", assistantText);
         log.scrollTop = log.scrollHeight;
       }
 
@@ -177,10 +413,12 @@
             assistant.classList.add("error");
             assistant.textContent = event.json.text || "에이전트 연결 오류";
             assistantHasAnswer = true;
+            assistantText = "";
             delete assistant.dataset.placeholder;
           } else if (event.type === "done") {
             if ((!assistantHasAnswer || assistant.dataset.placeholder === "status") && event.json.text) {
-              assistant.textContent = event.json.text;
+              assistantText = event.json.text;
+              setMessageContent(assistant, "assistant", assistantText);
               assistantHasAnswer = true;
               delete assistant.dataset.placeholder;
             }
@@ -201,8 +439,12 @@
     } catch (error) {
       assistant.classList.add("error");
       assistant.textContent = "에이전트 서버 연결 필요";
+      assistantHasAnswer = true;
       status.textContent = "연결 필요";
     } finally {
+      if (assistantHasAnswer && !assistant.classList.contains("error") && status.textContent !== "연결됨") {
+        status.textContent = "연결됨";
+      }
       sendButton.disabled = false;
       input.focus();
     }
@@ -282,13 +524,13 @@
       const saveActions = el("div", "hermes-save-actions");
       const saveButton = el("button", "hermes-save-button primary");
       saveButton.type = "button";
-      saveButton.append(icon("save"), el("span", "", "세이브"));
+      saveButton.append(icon("save"), el("span", "", "상태 저장"));
       const restoreButton = el("button", "hermes-save-button");
       restoreButton.type = "button";
       restoreButton.disabled = true;
-      restoreButton.append(icon("restore"), el("span", "", "돌아가기"));
+      restoreButton.append(icon("restore"), el("span", "", "되돌리기"));
       const refreshButton = iconButton("hermes-icon-button", "refresh", "새로고침");
-      const saveStatus = el("div", "hermes-save-status", "세이브 확인 중");
+      const saveStatus = el("div", "hermes-save-status", "상태 확인 중");
       const saveTimeline = el("div", "hermes-save-timeline");
       saveActions.append(saveButton, restoreButton, refreshButton);
       savePanel.append(saveActions, saveStatus, saveTimeline);
@@ -317,8 +559,8 @@
           saveTimeline.appendChild(unsaved);
         }
         if (!saves.length) {
-          saveTimeline.appendChild(el("div", "hermes-session-empty", "세이브 없음"));
-          saveStatus.textContent = "세이브 없음";
+          saveTimeline.appendChild(el("div", "hermes-session-empty", "저장 없음"));
+          saveStatus.textContent = "저장 없음";
           restoreButton.dataset.canRestore = "false";
           restoreButton.disabled = true;
           return;
@@ -339,7 +581,7 @@
           });
           saveTimeline.appendChild(item);
         });
-        saveStatus.textContent = payload.hasChanges ? `${payload.unsavedCount || 0}개 변경 있음` : "최신 세이브 상태";
+        saveStatus.textContent = payload.hasChanges ? `${payload.unsavedCount || 0}개 변경 있음` : "저장됨";
         restoreButton.dataset.canRestore = selectedSaveId && selectedSaveId !== currentId ? "true" : "false";
         restoreButton.disabled = restoreButton.dataset.canRestore !== "true";
       };
@@ -349,18 +591,18 @@
           const payload = await labGet("/api/lab/saves");
           renderSaves(payload);
         } catch (_error) {
-          saveStatus.textContent = "세이브를 불러올 수 없음";
+        saveStatus.textContent = "상태를 불러올 수 없음";
         }
       };
       saveButton.addEventListener("click", async () => {
         setSaveBusy(true);
-        saveStatus.textContent = "세이브 중";
+        saveStatus.textContent = "저장 중";
         try {
           const payload = await labRequest("/api/lab/save");
           renderSaves(payload);
-          saveStatus.textContent = payload.message || "세이브됨";
+          saveStatus.textContent = payload.message || "저장됨";
         } catch (_error) {
-          saveStatus.textContent = "세이브 실패";
+          saveStatus.textContent = "저장 실패";
         } finally {
           setSaveBusy(false);
           window.dispatchEvent(new CustomEvent("hermes-lab-refresh-needed"));
@@ -369,14 +611,14 @@
       restoreButton.addEventListener("click", async () => {
         if (!selectedSaveId) return;
         setSaveBusy(true);
-        saveStatus.textContent = "돌아가는 중";
+        saveStatus.textContent = "되돌리는 중";
         try {
           const payload = await labRequest("/api/lab/restore", { saveId: selectedSaveId });
           renderSaves(payload);
-          saveStatus.textContent = payload.message || "돌아감";
+          saveStatus.textContent = payload.message || "되돌림";
           window.dispatchEvent(new CustomEvent("hermes-lab-refresh-needed"));
         } catch (_error) {
-          saveStatus.textContent = "돌아가기 실패";
+          saveStatus.textContent = "되돌리기 실패";
         } finally {
           setSaveBusy(false);
         }
@@ -406,6 +648,32 @@
       history.setAttribute("aria-pressed", open ? "true" : "false");
     };
 
+    const restoreSession = async (sessionId, options) => {
+      const opts = options || {};
+      if (!sessionId) return false;
+      if (!opts.silent) status.textContent = "복원 중";
+      try {
+        const response = await fetch(`${bridgeUrl}/api/sessions/restore`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ mode, sessionId }),
+        });
+        const payload = await response.json();
+        if (!response.ok) throw new Error(payload.error || "restore failed");
+        setCurrentSessionId(payload.sessionId);
+        log.innerHTML = "";
+        (payload.messages || []).forEach((message) => appendMessage(log, message.role, message.content));
+        if (!(payload.messages || []).length && !opts.silent) appendMessage(log, "system", "복원됨");
+        if (opts.closeList !== false) setSessionListOpen(false);
+        status.textContent = opts.silent ? "연결됨" : "복원됨";
+        input.focus();
+        return true;
+      } catch (_error) {
+        if (!opts.silent) status.textContent = "복원 실패";
+        return false;
+      }
+    };
+
     const renderSessionList = (sessions) => {
       sessionList.innerHTML = "";
       const heading = el("div", "hermes-session-heading");
@@ -423,27 +691,7 @@
         const copy = el("span", "hermes-session-copy");
         copy.append(el("b", "", titleText), el("span", "", metaText));
         item.append(icon("history"), copy);
-        item.addEventListener("click", async () => {
-          status.textContent = "복원 중";
-          try {
-            const response = await fetch(`${bridgeUrl}/api/sessions/restore`, {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ mode, sessionId: session.sessionId }),
-            });
-            const payload = await response.json();
-            if (!response.ok) throw new Error(payload.error || "restore failed");
-            setCurrentSessionId(payload.sessionId);
-            log.innerHTML = "";
-            (payload.messages || []).forEach((message) => appendMessage(log, message.role, message.content));
-            if (!(payload.messages || []).length) appendMessage(log, "system", "복원됨");
-            setSessionListOpen(false);
-            status.textContent = "복원됨";
-            input.focus();
-          } catch (_error) {
-            status.textContent = "복원 실패";
-          }
-        });
+        item.addEventListener("click", () => restoreSession(session.sessionId));
         sessionList.appendChild(item);
       });
     };
@@ -502,6 +750,11 @@
       input.value = "";
       streamChat(message, log, send, input, status);
     });
+
+    window.setTimeout(() => {
+      const storedSessionId = localStorage.getItem(sessionStorageKey());
+      if (storedSessionId) restoreSession(storedSessionId, { silent: true, closeList: false });
+    }, 150);
     input.addEventListener("keydown", (event) => {
       if (event.key === "Enter" && !event.shiftKey) {
         event.preventDefault();
