@@ -14,7 +14,7 @@ from dataclasses import dataclass, field
 from http import HTTPStatus
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 from urllib.parse import parse_qs, urlparse
 
 
@@ -23,15 +23,18 @@ VISUALIZATION_ROOT = REPO_ROOT / "outputs" / "visualizations"
 LAB_ROOT = VISUALIZATION_ROOT / "hermes_lab_workspace"
 HERMES_ROOT = REPO_ROOT.parent / "hermes-agent"
 HERMES_VENV_PYTHON = Path("/usr/local/lib/hermes-agent/venv/bin/python")
+MEMORY_PATH = REPO_ROOT / "Memory.md"
 
 
 def maybe_reexec_with_hermes_python() -> None:
     if os.environ.get("GCOO_HERMES_BRIDGE_NO_REEXEC"):
         return
+    if os.environ.get("GCOO_HERMES_BRIDGE_REEXEC"):
+        return
     if not HERMES_VENV_PYTHON.exists():
         return
     current = Path(sys.executable)
-    if current == HERMES_VENV_PYTHON:
+    if current.resolve() == HERMES_VENV_PYTHON.resolve():
         return
     os.environ["GCOO_HERMES_BRIDGE_REEXEC"] = "1"
     os.execv(str(HERMES_VENV_PYTHON), [str(HERMES_VENV_PYTHON), *sys.argv])
@@ -46,6 +49,7 @@ You are the agent inside the GCOO optimization visualization.
 Answer in Korean by default.
 You may read and search the project at {REPO_ROOT}.
 Use tools to inspect real implementation files before answering model, data, or visualization questions.
+Follow {MEMORY_PATH}: prioritize core implementation and generated model-summary files, especially src/visualize_optimization_model.py, before raw data dumps.
 Do not write, patch, delete, commit, or run modifying commands in read mode.
 Keep explanations concise and grounded in file names, variables, equations, and data columns from this repository.
 """.strip()
@@ -77,6 +81,19 @@ SESSIONS: dict[tuple[str, str], AgentSession] = {}
 SESSIONS_LOCK = threading.Lock()
 SESSION_DB: Any | None = None
 SESSION_DB_LOCK = threading.Lock()
+SESSION_EVENT_SINKS: dict[str, Callable[[tuple[str, dict[str, Any]]], None]] = {}
+SESSION_EVENT_SINKS_LOCK = threading.Lock()
+
+
+def emit_session_event(session_id: str, event: str, data: dict[str, Any]) -> None:
+    with SESSION_EVENT_SINKS_LOCK:
+        sink = SESSION_EVENT_SINKS.get(session_id)
+    if sink is None:
+        return
+    try:
+        sink((event, data))
+    except Exception:
+        pass
 
 
 def run(command: list[str], cwd: Path | None = None) -> subprocess.CompletedProcess[str]:
@@ -180,6 +197,79 @@ def conversation_for_ui(messages: list[dict[str, Any]], limit: int = 8) -> list[
     return visible[-limit:]
 
 
+def compact_text(value: Any, limit: int = 120) -> str:
+    if value is None:
+        return ""
+    text = str(value).strip().replace("\n", " ")
+    while "  " in text:
+        text = text.replace("  ", " ")
+    if len(text) > limit:
+        return text[: limit - 1].rstrip() + "…"
+    return text
+
+
+def tool_detail(name: str, preview: Any = None, args: Any = None) -> str:
+    preview_text = compact_text(preview)
+    if preview_text:
+        return preview_text
+    if isinstance(args, dict):
+        for key in ("path", "file_path", "query", "pattern", "cmd", "command"):
+            value = args.get(key)
+            if value:
+                return compact_text(value)
+    return name
+
+
+def tool_status_text(event_name: str, name: str, preview: Any = None, args: Any = None, is_error: bool = False) -> str:
+    labels = {
+        "read_file": ("파일 읽는 중", "파일 읽기 완료"),
+        "search_files": ("파일 검색 중", "파일 검색 완료"),
+        "terminal": ("명령 실행 중", "명령 실행 완료"),
+        "process": ("프로세스 확인 중", "프로세스 확인 완료"),
+        "execute_code": ("코드 실행 중", "코드 실행 완료"),
+        "write_file": ("파일 쓰는 중", "파일 쓰기 완료"),
+        "patch": ("패치 적용 중", "패치 적용 완료"),
+    }
+    started, completed = labels.get(name, (f"{name} 실행 중", f"{name} 완료"))
+    if event_name in {"_thinking", "reasoning.available"} or name == "_thinking":
+        return "근거 정리 중"
+    if event_name == "tool.completed":
+        return f"{completed}{' 오류' if is_error else ''}"
+    detail = tool_detail(name, preview, args)
+    return f"{started}: {detail}" if detail and detail != name else started
+
+
+def make_agent_callbacks(session_id: str) -> dict[str, Callable[..., None]]:
+    def tool_progress_callback(*args: Any, **kwargs: Any) -> None:
+        event_name = str(args[0]) if args else str(kwargs.get("event") or "tool.started")
+        name = str(args[1]) if len(args) > 1 else str(kwargs.get("tool_name") or kwargs.get("name") or "")
+        preview = args[2] if len(args) > 2 else kwargs.get("preview")
+        tool_args = args[3] if len(args) > 3 else kwargs.get("args")
+        text = tool_status_text(event_name, name, preview, tool_args, bool(kwargs.get("is_error")))
+        emit_session_event(session_id, "status", {"text": text, "kind": "tool", "tool": name, "toolEvent": event_name})
+
+    def status_callback(*args: Any, **kwargs: Any) -> None:
+        message = kwargs.get("message") or kwargs.get("text")
+        kind = kwargs.get("kind")
+        if len(args) == 1:
+            message = args[0]
+        elif len(args) >= 2:
+            kind, message = args[0], args[1]
+        text = compact_text(message)
+        if text:
+            emit_session_event(session_id, "status", {"text": text, "kind": str(kind or "status")})
+
+    def event_callback(event_type: str, context: dict[str, Any] | None = None) -> None:
+        if event_type == "session:compress":
+            emit_session_event(session_id, "status", {"text": "이전 대화 정리 중", "kind": "session"})
+
+    return {
+        "tool_progress_callback": tool_progress_callback,
+        "status_callback": status_callback,
+        "event_callback": event_callback,
+    }
+
+
 def precreate_db_session(mode: str, db_session_id: str, workspace: Path) -> Any:
     db = get_session_db()
     runtime = runtime_kwargs()
@@ -231,6 +321,7 @@ def make_agent_session(mode: str, session_id: str, history: list[dict[str, Any]]
         max_iterations=24 if mode == "lab" else 12,
         ephemeral_system_prompt=system_prompt,
         session_db=session_db,
+        **make_agent_callbacks(hermes_session_id),
     )
     return AgentSession(
         mode=mode,
@@ -247,15 +338,19 @@ def get_agent_session(mode: str, session_id: str) -> AgentSession:
     key = (mode, db_session_id)
     with SESSIONS_LOCK:
         session = SESSIONS.get(key)
-        if session is None:
+    if session is None:
+        history = []
+        try:
+            history = get_session_db().get_messages_as_conversation(db_session_id, include_ancestors=True)
+        except Exception:
             history = []
-            try:
-                history = get_session_db().get_messages_as_conversation(db_session_id, include_ancestors=True)
-            except Exception:
-                history = []
-            session = make_agent_session(mode, client_session_id, history=history)
+        session = make_agent_session(mode, client_session_id, history=history)
+        with SESSIONS_LOCK:
+            existing = SESSIONS.get(key)
+            if existing is not None:
+                return existing
             SESSIONS[key] = session
-        return session
+    return session
 
 
 def restore_agent_session(mode: str, db_session_id: str) -> AgentSession:
@@ -594,28 +689,39 @@ class HermesBridgeHandler(SimpleHTTPRequestHandler):
         self.send_response(200)
         self.send_header("Content-Type", "text/event-stream; charset=utf-8")
         self.send_header("Cache-Control", "no-cache")
-        self.send_header("Connection", "keep-alive")
+        self.send_header("Connection", "close")
         self.end_headers()
 
         events: queue.Queue[tuple[str, dict[str, Any]] | None] = queue.Queue()
+        events.put(("status", {"text": "에이전트 준비 중"}))
 
         def worker() -> None:
             try:
                 session = get_agent_session(mode, session_id)
                 with session.lock:
+                    def sink(item: tuple[str, dict[str, Any]]) -> None:
+                        events.put(item)
+
+                    with SESSION_EVENT_SINKS_LOCK:
+                        SESSION_EVENT_SINKS[session.db_session_id] = sink
                     events.put(("status", {"text": "에이전트 연결"}))
 
                     def on_delta(delta: str, **_kwargs: Any) -> None:
                         if delta:
                             events.put(("delta", {"text": delta}))
 
-                    result = session.agent.run_conversation(
-                        message,
-                        system_message=LAB_SYSTEM_PROMPT if mode == "lab" else READ_SYSTEM_PROMPT,
-                        conversation_history=session.history or None,
-                        task_id=session.agent.session_id,
-                        stream_callback=on_delta,
-                    )
+                    try:
+                        result = session.agent.run_conversation(
+                            message,
+                            system_message=LAB_SYSTEM_PROMPT if mode == "lab" else READ_SYSTEM_PROMPT,
+                            conversation_history=session.history or None,
+                            task_id=session.agent.session_id,
+                            stream_callback=on_delta,
+                        )
+                    finally:
+                        with SESSION_EVENT_SINKS_LOCK:
+                            if SESSION_EVENT_SINKS.get(session.db_session_id) is sink:
+                                del SESSION_EVENT_SINKS[session.db_session_id]
                     session.history = result.get("messages") or session.history
                     events.put(
                         (
@@ -633,8 +739,14 @@ class HermesBridgeHandler(SimpleHTTPRequestHandler):
                 events.put(None)
 
         threading.Thread(target=worker, daemon=True).start()
+        heartbeat_index = 0
+        heartbeat_messages = ("작업 계속 진행 중", "도구 결과 확인 중", "답변 준비 중")
         while True:
-            item = events.get()
+            try:
+                item = events.get(timeout=6)
+            except queue.Empty:
+                item = ("status", {"text": heartbeat_messages[heartbeat_index % len(heartbeat_messages)], "kind": "heartbeat"})
+                heartbeat_index += 1
             if item is None:
                 break
             event, data = item

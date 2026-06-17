@@ -3,8 +3,17 @@ from __future__ import annotations
 import html
 import json
 import math
+import gc
+import multiprocessing
+import os
 from pathlib import Path
 from typing import Any
+from concurrent.futures import ProcessPoolExecutor
+
+os.environ.setdefault("OMP_NUM_THREADS", "1")
+os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
+os.environ.setdefault("MKL_NUM_THREADS", "1")
+os.environ.setdefault("NUMEXPR_NUM_THREADS", "1")
 
 import folium
 import numpy as np
@@ -34,6 +43,18 @@ TEMPORAL_REGRESSION_WEIGHT = 0.35
 TEMPORAL_MAX_ANIMATION_FLOWS = 24
 TEMPORAL_MAX_ANIMATION_ZONES = 140
 TEMPORAL_SHORTAGE_TABLE_ROWS = 30
+PARAMETER_SEARCH_TRIALS = 100
+PARAMETER_SEARCH_SEED = 20260617
+PARAMETER_SEARCH_LAMBDA_RANGE = (0.0, 1.2)
+PARAMETER_SEARCH_BETA_RANGE = (0.02, 0.20)
+PARAMETER_SEARCH_THETA_RANGE = (0.0, 1.5)
+PARAMETER_SEARCH_LAMBDA_STEP = 0.05
+PARAMETER_SEARCH_BETA_STEP = 0.005
+PARAMETER_SEARCH_THETA_STEP = 0.05
+PARAMETER_SEARCH_TOP_K = 10
+PARAMETER_SEARCH_RESERVED_CPU_CORES = 2
+PARAMETER_SEARCH_CHUNK_SIZE = 8
+PARAMETER_SEARCH_OBSERVED_SECONDS_PER_CASE = 0.04
 SEJONG_GRID_LAT_STEP = 0.0044915558749550845
 SEJONG_GRID_LON_STEP = 0.005587124211191894
 OPERATING_HOUR_SEQUENCE = list(range(4, 24)) + list(range(0, 4))
@@ -73,22 +94,36 @@ def standard_normal_cdf(value: float) -> float:
     return 0.5 * (1.0 + math.erf(float(value) / math.sqrt(2.0)))
 
 
-def demand_capture(adjusted_demand: float, x_value: float, competitor: float) -> float:
+def demand_capture(
+    adjusted_demand: float,
+    x_value: float,
+    competitor: float,
+    beta_capture: float = BETA_CAPTURE,
+    theta_competition: float = THETA_COMPETITION,
+) -> float:
     if x_value <= 0 or adjusted_demand <= 0:
         return 0.0
-    accessibility = 1.0 - math.exp(-BETA_CAPTURE * x_value / (1.0 + THETA_COMPETITION * competitor))
+    denominator = max(1e-9, 1.0 + theta_competition * competitor)
+    accessibility = 1.0 - math.exp(-beta_capture * x_value / denominator)
     return min(adjusted_demand * accessibility, U_MAX_RIDES * x_value)
 
 
-def zone_profit(adjusted_demand: float, x_value: int, competitor: float, rebalance_km: float) -> float:
-    rides = demand_capture(adjusted_demand, float(x_value), competitor)
+def zone_profit(
+    adjusted_demand: float,
+    x_value: int,
+    competitor: float,
+    rebalance_km: float,
+    beta_capture: float = BETA_CAPTURE,
+    theta_competition: float = THETA_COMPETITION,
+) -> float:
+    rides = demand_capture(adjusted_demand, float(x_value), competitor, beta_capture, theta_competition)
     ride_margin = (REVENUE_PER_RIDE_KRW - VARIABLE_COST_KRW) * rides
     fixed_cost = FIXED_COST_PER_DEVICE_KRW * x_value
     rebalance_cost = REBALANCING_KRW_PER_KM * rebalance_km * rides
     return ride_margin - fixed_cost - rebalance_cost
 
 
-def build_zone_model(processed_dir: Path) -> tuple[pd.DataFrame, dict[str, Any]]:
+def build_zone_model(processed_dir: Path, lambda_market: float = LAMBDA_MARKET) -> tuple[pd.DataFrame, dict[str, Any]]:
     latest = read_csv(processed_dir / "sejong_pm_latest_snapshot.csv")
     segments = read_csv(processed_dir / "sejong_pm_inferred_rides.csv")
     od_flows = read_csv(processed_dir / "sejong_pm_od_flows.csv")
@@ -194,7 +229,7 @@ def build_zone_model(processed_dir: Path) -> tuple[pd.DataFrame, dict[str, Any]]
     denominator = math.log1p(max_competitor) if max_competitor > 0 else 1.0
     model["competition_index"] = model["alpaca_competitor"].map(lambda value: math.log1p(float(value)) / denominator)
     model["D_i"] = model["inferred_rides"].astype(float)
-    model["A_i"] = model["D_i"] * (1.0 + LAMBDA_MARKET * model["competition_index"])
+    model["A_i"] = model["D_i"] * (1.0 + float(lambda_market) * model["competition_index"])
     model["K_i"] = (CAPACITY_MULTIPLIER * model["total_current_pm"]).map(math.ceil)
     model.loc[(model["K_i"] <= 0) & (model["A_i"] > 0), "K_i"] = 3
     model["K_i"] = model["K_i"].astype(int)
@@ -216,7 +251,18 @@ def build_zone_model(processed_dir: Path) -> tuple[pd.DataFrame, dict[str, Any]]
     return model, meta
 
 
-def optimize_dashboard_solution(model: pd.DataFrame, fleet_size: int) -> tuple[pd.DataFrame, dict[str, Any]]:
+def model_with_lambda(model: pd.DataFrame, lambda_market: float) -> pd.DataFrame:
+    rows = model.copy()
+    rows["A_i"] = rows["D_i"].astype(float) * (1.0 + float(lambda_market) * rows["competition_index"].astype(float))
+    return rows
+
+
+def optimize_dashboard_solution(
+    model: pd.DataFrame,
+    fleet_size: int,
+    beta_capture: float = BETA_CAPTURE,
+    theta_competition: float = THETA_COMPETITION,
+) -> tuple[pd.DataFrame, dict[str, Any]]:
     rows = model.copy()
     rows["x_star"] = 0
 
@@ -224,7 +270,14 @@ def optimize_dashboard_solution(model: pd.DataFrame, fleet_size: int) -> tuple[p
     for row in rows.itertuples():
         previous_profit = 0.0
         for k in range(1, int(row.K_i) + 1):
-            current_profit = zone_profit(row.A_i, k, row.alpaca_competitor, row.expected_rebalance_km)
+            current_profit = zone_profit(
+                row.A_i,
+                k,
+                row.alpaca_competitor,
+                row.expected_rebalance_km,
+                beta_capture,
+                theta_competition,
+            )
             candidates.append(
                 {
                     "zone_id": row.zone_id,
@@ -247,7 +300,7 @@ def optimize_dashboard_solution(model: pd.DataFrame, fleet_size: int) -> tuple[p
 
     rows["x_star"] = rows["zone_id"].map(allocation).fillna(0).astype(int)
     rows["Q_i_xstar"] = [
-        demand_capture(row.A_i, row.x_star, row.alpaca_competitor)
+        demand_capture(row.A_i, row.x_star, row.alpaca_competitor, beta_capture, theta_competition)
         for row in rows.itertuples(index=False)
     ]
     rows["ride_revenue_krw"] = REVENUE_PER_RIDE_KRW * rows["Q_i_xstar"]
@@ -720,6 +773,81 @@ def fit_temporal_od_rates(segments: pd.DataFrame) -> tuple[pd.DataFrame, dict[st
     return pd.DataFrame(rate_rows), meta
 
 
+def generate_temporal_demand_events(
+    rate_rows: pd.DataFrame,
+    target_expected_rides: float,
+    seed: int = TEMPORAL_SIMULATION_SEED,
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    if rate_rows.empty:
+        return [], {
+            "target_expected_rides": float(target_expected_rides),
+            "uncalibrated_temporal_rate_total": 0.0,
+            "demand_calibration_factor": 1.0,
+            "simulated_demand": 0,
+        }
+
+    uncalibrated_rate_total = float(rate_rows["blended_rate"].sum())
+    demand_calibration_factor = (
+        float(target_expected_rides) / uncalibrated_rate_total
+        if target_expected_rides > 0.0 and uncalibrated_rate_total > 0.0
+        else 1.0
+    )
+    calibrated_rates = rate_rows.copy()
+    calibrated_rates["base_blended_rate"] = calibrated_rates["blended_rate"]
+    calibrated_rates["blended_rate"] = calibrated_rates["blended_rate"] * demand_calibration_factor
+
+    rng = np.random.default_rng(seed)
+    simulated_demands: list[dict[str, Any]] = []
+    for hour in OPERATING_HOUR_SEQUENCE:
+        hour_rates = calibrated_rates[calibrated_rates["sim_hour"] == hour].copy()
+        common_z = float(rng.normal())
+        origins = sorted(hour_rates["prev_zone_id"].astype(str).unique().tolist())
+        origin_z = {origin: float(rng.normal()) for origin in origins}
+        for row in hour_rates.itertuples(index=False):
+            independent_z = float(rng.normal())
+            origin = str(row.prev_zone_id)
+            residual_scale = math.sqrt(
+                max(0.0, 1.0 - TEMPORAL_COMMON_CORRELATION**2 - TEMPORAL_ORIGIN_CORRELATION**2)
+            )
+            z_value = (
+                TEMPORAL_COMMON_CORRELATION * common_z
+                + TEMPORAL_ORIGIN_CORRELATION * origin_z[origin]
+                + residual_scale * independent_z
+            )
+            multiplier = math.exp(TEMPORAL_RANDOM_SIGMA * z_value - 0.5 * TEMPORAL_RANDOM_SIGMA**2)
+            demand_lambda = max(0.0, float(row.blended_rate) * multiplier)
+            demand = int(rng.poisson(demand_lambda))
+            if demand <= 0:
+                continue
+            simulated_demands.append(
+                {
+                    "sim_hour": int(hour),
+                    "hour_label": hour_label(hour),
+                    "origin": origin,
+                    "destination": str(row.zone_id),
+                    "demand": demand,
+                    "rate": float(row.blended_rate),
+                    "base_rate": float(row.base_blended_rate),
+                    "regression_rate": float(row.regression_rate),
+                    "empirical_rate": float(row.empirical_rate),
+                    "normal_z": z_value,
+                    "normal_quantile": standard_normal_cdf(z_value),
+                    "origin_latitude": float(row.origin_latitude),
+                    "origin_longitude": float(row.origin_longitude),
+                    "dest_latitude": float(row.dest_latitude),
+                    "dest_longitude": float(row.dest_longitude),
+                }
+            )
+
+    meta = {
+        "target_expected_rides": float(target_expected_rides),
+        "uncalibrated_temporal_rate_total": uncalibrated_rate_total,
+        "demand_calibration_factor": demand_calibration_factor,
+        "simulated_demand": int(sum(item["demand"] for item in simulated_demands)),
+    }
+    return simulated_demands, meta
+
+
 def build_zone_coordinate_lookup(rows: pd.DataFrame, rate_rows: pd.DataFrame) -> dict[str, dict[str, float]]:
     coords: dict[str, dict[str, float]] = {}
     for row in rows.itertuples(index=False):
@@ -762,16 +890,13 @@ def build_temporal_inventory_simulation(rows: pd.DataFrame, processed_dir: Path)
         }
 
     target_expected_rides = float(rows["Q_i_xstar"].sum()) if "Q_i_xstar" in rows.columns else 0.0
-    uncalibrated_rate_total = float(rate_rows["blended_rate"].sum())
-    demand_calibration_factor = (
-        target_expected_rides / uncalibrated_rate_total
-        if target_expected_rides > 0.0 and uncalibrated_rate_total > 0.0
-        else 1.0
+    simulated_demands, demand_meta = generate_temporal_demand_events(
+        rate_rows,
+        target_expected_rides,
+        TEMPORAL_SIMULATION_SEED,
     )
-    rate_rows = rate_rows.copy()
-    rate_rows["base_blended_rate"] = rate_rows["blended_rate"]
-    rate_rows["blended_rate"] = rate_rows["blended_rate"] * demand_calibration_factor
-
+    uncalibrated_rate_total = float(demand_meta["uncalibrated_temporal_rate_total"])
+    demand_calibration_factor = float(demand_meta["demand_calibration_factor"])
     coords = build_zone_coordinate_lookup(rows, rate_rows)
     inventory = {
         str(row.zone_id): int(round(float(row.x_star) + float(row.alpaca_competitor)))
@@ -779,49 +904,6 @@ def build_temporal_inventory_simulation(rows: pd.DataFrame, processed_dir: Path)
     }
     for zone_id in coords:
         inventory.setdefault(zone_id, 0)
-
-    rng = np.random.default_rng(TEMPORAL_SIMULATION_SEED)
-    simulated_demands: list[dict[str, Any]] = []
-    for hour in OPERATING_HOUR_SEQUENCE:
-        hour_rates = rate_rows[rate_rows["sim_hour"] == hour].copy()
-        common_z = float(rng.normal())
-        origins = sorted(hour_rates["prev_zone_id"].astype(str).unique().tolist())
-        origin_z = {origin: float(rng.normal()) for origin in origins}
-        for row in hour_rates.itertuples(index=False):
-            independent_z = float(rng.normal())
-            origin = str(row.prev_zone_id)
-            residual_scale = math.sqrt(
-                max(0.0, 1.0 - TEMPORAL_COMMON_CORRELATION**2 - TEMPORAL_ORIGIN_CORRELATION**2)
-            )
-            z_value = (
-                TEMPORAL_COMMON_CORRELATION * common_z
-                + TEMPORAL_ORIGIN_CORRELATION * origin_z[origin]
-                + residual_scale * independent_z
-            )
-            multiplier = math.exp(TEMPORAL_RANDOM_SIGMA * z_value - 0.5 * TEMPORAL_RANDOM_SIGMA**2)
-            demand_lambda = max(0.0, float(row.blended_rate) * multiplier)
-            demand = int(rng.poisson(demand_lambda))
-            if demand <= 0:
-                continue
-            simulated_demands.append(
-                {
-                    "sim_hour": int(hour),
-                    "hour_label": hour_label(hour),
-                    "origin": origin,
-                    "destination": str(row.zone_id),
-                    "demand": demand,
-                    "rate": float(row.blended_rate),
-                    "base_rate": float(row.base_blended_rate),
-                    "regression_rate": float(row.regression_rate),
-                    "empirical_rate": float(row.empirical_rate),
-                    "normal_z": z_value,
-                    "normal_quantile": standard_normal_cdf(z_value),
-                    "origin_latitude": float(row.origin_latitude),
-                    "origin_longitude": float(row.origin_longitude),
-                    "dest_latitude": float(row.dest_latitude),
-                    "dest_longitude": float(row.dest_longitude),
-                }
-            )
 
     hourly_summary: list[dict[str, Any]] = []
     shortages: list[dict[str, Any]] = []
@@ -1022,6 +1104,587 @@ def build_temporal_inventory_simulation(rows: pd.DataFrame, processed_dir: Path)
         "top_movements": sorted(movement_records, key=lambda item: item["demand"], reverse=True)[:40],
         "animation": {"bounds": bounds, "frames": frames},
         "method": method,
+    }
+
+
+def score_inventory_against_demands(rows: pd.DataFrame, demand_events: list[dict[str, Any]]) -> dict[str, Any]:
+    inventory = {
+        str(row.zone_id): int(round(float(row.x_star) + float(row.alpaca_competitor)))
+        for row in rows.itertuples(index=False)
+    }
+    for event in demand_events:
+        inventory.setdefault(str(event["origin"]), 0)
+        inventory.setdefault(str(event["destination"]), 0)
+
+    hourly_summary: list[dict[str, Any]] = []
+    shortages: list[dict[str, Any]] = []
+    demand_by_hour: dict[int, list[dict[str, Any]]] = {}
+    for event in demand_events:
+        demand_by_hour.setdefault(int(event["sim_hour"]), []).append(event)
+
+    for hour in OPERATING_HOUR_SEQUENCE:
+        hour_items = demand_by_hour.get(int(hour), [])
+        by_origin: dict[str, list[dict[str, Any]]] = {}
+        for item in hour_items:
+            by_origin.setdefault(str(item["origin"]), []).append(item)
+
+        arrivals: dict[str, int] = {}
+        hour_demand = 0
+        hour_served = 0
+        hour_unmet = 0
+
+        for origin, items in by_origin.items():
+            total_demand = int(sum(int(item["demand"]) for item in items))
+            available = int(max(0, inventory.get(origin, 0)))
+            served_total = min(total_demand, available)
+            unmet_total = total_demand - served_total
+            inventory[origin] = available - served_total
+            served_by_item = allocate_served_by_destination(items, served_total)
+
+            hour_demand += total_demand
+            hour_served += served_total
+            hour_unmet += unmet_total
+
+            if unmet_total > 0:
+                shortages.append(
+                    {
+                        "hour": int(hour),
+                        "hour_label": hour_label(hour),
+                        "zone_id": origin,
+                        "demand": total_demand,
+                        "served": served_total,
+                        "shortage": unmet_total,
+                        "available_at_hour_start": available,
+                    }
+                )
+
+            for item, served in zip(items, served_by_item, strict=False):
+                if served <= 0:
+                    continue
+                destination = str(item["destination"])
+                arrivals[destination] = arrivals.get(destination, 0) + int(served)
+
+        for destination, count in arrivals.items():
+            inventory[destination] = int(inventory.get(destination, 0)) + int(count)
+
+        hourly_summary.append(
+            {
+                "hour": int(hour),
+                "hour_label": hour_label(hour),
+                "demand": int(hour_demand),
+                "served": int(hour_served),
+                "unmet": int(hour_unmet),
+                "service_rate": hour_served / hour_demand if hour_demand > 0 else 1.0,
+            }
+        )
+
+    total_demand = int(sum(row["demand"] for row in hourly_summary))
+    total_served = int(sum(row["served"] for row in hourly_summary))
+    total_unmet = int(sum(row["unmet"] for row in hourly_summary))
+    shortage_zones = sorted({row["zone_id"] for row in shortages})
+    peak_hour = max(hourly_summary, key=lambda item: item["unmet"], default={"hour_label": "n/a", "unmet": 0})
+    return {
+        "simulated_demand": total_demand,
+        "served_rides": total_served,
+        "unmet_rides": total_unmet,
+        "service_rate": total_served / total_demand if total_demand > 0 else 1.0,
+        "unmet_rate": total_unmet / total_demand if total_demand > 0 else 0.0,
+        "shortage_zone_count": len(shortage_zones),
+        "shortage_event_count": len(shortages),
+        "peak_shortage_hour": peak_hour["hour_label"],
+        "peak_shortage_count": int(peak_hour["unmet"]),
+        "hourly_summary": hourly_summary,
+    }
+
+
+def parameter_starting_points(trial_count: int = PARAMETER_SEARCH_TRIALS) -> list[dict[str, Any]]:
+    trial_count = max(1, int(trial_count))
+    starts = [
+        {
+            "trial": 1,
+            "lambda_market": float(LAMBDA_MARKET),
+            "beta_capture": float(BETA_CAPTURE),
+            "theta_competition": float(THETA_COMPETITION),
+            "source": "current_dashboard_value",
+        }
+    ]
+    if trial_count == 1:
+        return starts
+
+    rng = np.random.default_rng(PARAMETER_SEARCH_SEED)
+    n = trial_count - 1
+
+    def stratified(low: float, high: float, count: int, *, log_scale: bool = False) -> np.ndarray:
+        quantiles = (np.arange(count, dtype=float) + rng.random(count)) / max(1, count)
+        rng.shuffle(quantiles)
+        if log_scale:
+            return np.exp(math.log(low) + quantiles * (math.log(high) - math.log(low)))
+        return low + quantiles * (high - low)
+
+    lambdas = stratified(*PARAMETER_SEARCH_LAMBDA_RANGE, n)
+    betas = stratified(*PARAMETER_SEARCH_BETA_RANGE, n, log_scale=True)
+    thetas = stratified(*PARAMETER_SEARCH_THETA_RANGE, n)
+    for idx in range(n):
+        starts.append(
+            {
+                "trial": idx + 2,
+                "lambda_market": float(lambdas[idx]),
+                "beta_capture": float(betas[idx]),
+                "theta_competition": float(thetas[idx]),
+                "source": "stratified_multistart",
+            }
+        )
+    return starts
+
+
+def inclusive_float_grid(low: float, high: float, step: float, digits: int = 6) -> list[float]:
+    low = float(low)
+    high = float(high)
+    step = max(float(step), 1e-9)
+    values: list[float] = []
+    current = low
+    while current <= high + step * 0.5:
+        values.append(round(min(current, high), digits))
+        current += step
+    return sorted(set(values))
+
+
+def parameter_grid_points(
+    lambda_step: float = PARAMETER_SEARCH_LAMBDA_STEP,
+    beta_step: float = PARAMETER_SEARCH_BETA_STEP,
+    theta_step: float = PARAMETER_SEARCH_THETA_STEP,
+) -> tuple[list[float], list[float], list[float]]:
+    return (
+        inclusive_float_grid(*PARAMETER_SEARCH_LAMBDA_RANGE, lambda_step),
+        inclusive_float_grid(*PARAMETER_SEARCH_BETA_RANGE, beta_step),
+        inclusive_float_grid(*PARAMETER_SEARCH_THETA_RANGE, theta_step),
+    )
+
+
+def parameter_search_worker_count(max_workers: int | None = None) -> int:
+    cpu_count = os.cpu_count() or 1
+    if max_workers is not None:
+        return max(1, min(int(max_workers), cpu_count))
+    return max(1, cpu_count - PARAMETER_SEARCH_RESERVED_CPU_CORES)
+
+
+def parameter_search_plan(
+    trial_count: int = PARAMETER_SEARCH_TRIALS,
+    lambda_step: float = PARAMETER_SEARCH_LAMBDA_STEP,
+    beta_step: float = PARAMETER_SEARCH_BETA_STEP,
+    theta_step: float = PARAMETER_SEARCH_THETA_STEP,
+    max_workers: int | None = None,
+) -> dict[str, Any]:
+    trial_count = max(1, int(trial_count))
+    lambdas, betas, thetas = parameter_grid_points(lambda_step, beta_step, theta_step)
+    parameter_combination_count = int(len(lambdas) * len(betas) * len(thetas))
+    case_count = int(parameter_combination_count * trial_count)
+    estimated_runtime_seconds = float(case_count * PARAMETER_SEARCH_OBSERVED_SECONDS_PER_CASE)
+    worker_count = parameter_search_worker_count(max_workers)
+    estimated_parallel_runtime_seconds = estimated_runtime_seconds / max(1, worker_count)
+    return {
+        "trial_count": int(trial_count),
+        "trials_per_parameter_combination": int(trial_count),
+        "parameter_combination_count": parameter_combination_count,
+        "case_count": case_count,
+        "estimated_runtime_seconds": estimated_runtime_seconds,
+        "estimated_runtime_hours": estimated_runtime_seconds / 3600.0,
+        "estimated_parallel_runtime_seconds": estimated_parallel_runtime_seconds,
+        "estimated_parallel_runtime_hours": estimated_parallel_runtime_seconds / 3600.0,
+        "observed_seconds_per_case": PARAMETER_SEARCH_OBSERVED_SECONDS_PER_CASE,
+        "observed_benchmark": "100 cases / 4 seconds on the current local run",
+        "cpu_count": int(os.cpu_count() or 1),
+        "reserved_cpu_cores": PARAMETER_SEARCH_RESERVED_CPU_CORES,
+        "worker_count": int(worker_count),
+        "chunk_size": PARAMETER_SEARCH_CHUNK_SIZE,
+        "parallel_strategy": "process_pool_executor",
+        "parameter_steps": {
+            "lambda_market": float(lambda_step),
+            "beta_capture": float(beta_step),
+            "theta_competition": float(theta_step),
+        },
+        "parameter_grid_size": {
+            "lambda_market": len(lambdas),
+            "beta_capture": len(betas),
+            "theta_competition": len(thetas),
+        },
+    }
+
+
+CompactDemandScenario = tuple[tuple[int, tuple[tuple[str, int, tuple[tuple[str, int], ...]], ...]], ...]
+
+_PARAMETER_WORKER_BASE_MODEL: pd.DataFrame | None = None
+_PARAMETER_WORKER_DEMAND_SCENARIOS: list[CompactDemandScenario] | None = None
+
+
+def compact_demand_scenario(demand_events: list[dict[str, Any]]) -> CompactDemandScenario:
+    by_hour_origin: dict[int, dict[str, dict[str, int]]] = {}
+    for event in demand_events:
+        hour = int(event["sim_hour"])
+        origin = str(event["origin"])
+        destination = str(event["destination"])
+        demand = int(event["demand"])
+        if demand <= 0:
+            continue
+        by_origin = by_hour_origin.setdefault(hour, {})
+        by_destination = by_origin.setdefault(origin, {})
+        by_destination[destination] = by_destination.get(destination, 0) + demand
+
+    compact_hours: list[tuple[int, tuple[tuple[str, int, tuple[tuple[str, int], ...]], ...]]] = []
+    for hour in OPERATING_HOUR_SEQUENCE:
+        origin_rows: list[tuple[str, int, tuple[tuple[str, int], ...]]] = []
+        for origin, destination_demands in sorted(by_hour_origin.get(int(hour), {}).items()):
+            destinations = tuple(
+                (destination, int(demand))
+                for destination, demand in sorted(destination_demands.items())
+                if int(demand) > 0
+            )
+            total_demand = int(sum(demand for _destination, demand in destinations))
+            if total_demand > 0:
+                origin_rows.append((origin, total_demand, destinations))
+        compact_hours.append((int(hour), tuple(origin_rows)))
+    return tuple(compact_hours)
+
+
+def served_destination_counts(
+    destinations: tuple[tuple[str, int], ...],
+    served_total: int,
+    total_demand: int,
+) -> list[tuple[str, int]]:
+    served_total = int(served_total)
+    total_demand = int(total_demand)
+    if served_total <= 0 or total_demand <= 0:
+        return []
+    if served_total >= total_demand:
+        return [(destination, int(demand)) for destination, demand in destinations if int(demand) > 0]
+
+    raw_values = [served_total * int(demand) / total_demand for _destination, demand in destinations]
+    served = [int(math.floor(value)) for value in raw_values]
+    remainder = int(served_total - sum(served))
+    order = sorted(range(len(destinations)), key=lambda idx: raw_values[idx] - served[idx], reverse=True)
+    for idx in order[:remainder]:
+        served[idx] += 1
+    return [
+        (str(destinations[idx][0]), int(count))
+        for idx, count in enumerate(served)
+        if int(count) > 0
+    ]
+
+
+def summarize_scores(scores: list[dict[str, Any]]) -> dict[str, Any]:
+    trial_count = max(1, len(scores))
+    total_demand = int(sum(int(score["simulated_demand"]) for score in scores))
+    total_served = int(sum(int(score["served_rides"]) for score in scores))
+    total_unmet = int(sum(int(score["unmet_rides"]) for score in scores))
+    avg_shortage_zones = float(np.mean([score["shortage_zone_count"] for score in scores])) if scores else 0.0
+    avg_shortage_events = float(np.mean([score["shortage_event_count"] for score in scores])) if scores else 0.0
+    worst = max(scores, key=lambda item: int(item["unmet_rides"]), default={})
+    best = min(scores, key=lambda item: int(item["unmet_rides"]), default={})
+    return {
+        "trial_count": int(trial_count),
+        "total_simulated_demand": total_demand,
+        "total_served_rides": total_served,
+        "total_unmet_rides": total_unmet,
+        "avg_simulated_demand": total_demand / trial_count,
+        "avg_served_rides": total_served / trial_count,
+        "avg_unmet_rides": total_unmet / trial_count,
+        "service_rate": total_served / total_demand if total_demand > 0 else 1.0,
+        "unmet_rate": total_unmet / total_demand if total_demand > 0 else 0.0,
+        "avg_shortage_zone_count": avg_shortage_zones,
+        "avg_shortage_event_count": avg_shortage_events,
+        "best_trial_unmet_rides": int(best.get("unmet_rides", 0)),
+        "worst_trial_unmet_rides": int(worst.get("unmet_rides", 0)),
+    }
+
+
+def score_inventory_against_compact_demands(
+    rows: pd.DataFrame,
+    demand_scenario: CompactDemandScenario,
+) -> dict[str, Any]:
+    inventory = {
+        str(row.zone_id): int(round(float(row.x_star) + float(row.alpaca_competitor)))
+        for row in rows.itertuples(index=False)
+    }
+
+    hourly_summary: list[dict[str, Any]] = []
+    shortage_zones: set[str] = set()
+    shortage_event_count = 0
+
+    for hour, origin_rows in demand_scenario:
+        arrivals: dict[str, int] = {}
+        hour_demand = 0
+        hour_served = 0
+        hour_unmet = 0
+
+        for origin, total_demand, destinations in origin_rows:
+            available = int(max(0, inventory.get(origin, 0)))
+            served_total = min(int(total_demand), available)
+            unmet_total = int(total_demand) - served_total
+            inventory[origin] = available - served_total
+
+            hour_demand += int(total_demand)
+            hour_served += served_total
+            hour_unmet += unmet_total
+
+            if unmet_total > 0:
+                shortage_zones.add(origin)
+                shortage_event_count += 1
+
+            for destination, served in served_destination_counts(destinations, served_total, total_demand):
+                arrivals[destination] = arrivals.get(destination, 0) + int(served)
+
+        for destination, count in arrivals.items():
+            inventory[destination] = int(inventory.get(destination, 0)) + int(count)
+
+        hourly_summary.append(
+            {
+                "hour": int(hour),
+                "hour_label": hour_label(hour),
+                "demand": int(hour_demand),
+                "served": int(hour_served),
+                "unmet": int(hour_unmet),
+                "service_rate": hour_served / hour_demand if hour_demand > 0 else 1.0,
+            }
+        )
+
+    total_demand = int(sum(row["demand"] for row in hourly_summary))
+    total_served = int(sum(row["served"] for row in hourly_summary))
+    total_unmet = int(sum(row["unmet"] for row in hourly_summary))
+    peak_hour = max(hourly_summary, key=lambda item: item["unmet"], default={"hour_label": "n/a", "unmet": 0})
+    return {
+        "simulated_demand": total_demand,
+        "served_rides": total_served,
+        "unmet_rides": total_unmet,
+        "service_rate": total_served / total_demand if total_demand > 0 else 1.0,
+        "unmet_rate": total_unmet / total_demand if total_demand > 0 else 0.0,
+        "shortage_zone_count": len(shortage_zones),
+        "shortage_event_count": int(shortage_event_count),
+        "peak_shortage_hour": peak_hour["hour_label"],
+        "peak_shortage_count": int(peak_hour["unmet"]),
+        "hourly_summary": hourly_summary,
+    }
+
+
+def init_parameter_search_worker(
+    base_model: pd.DataFrame,
+    demand_scenarios: list[CompactDemandScenario],
+) -> None:
+    global _PARAMETER_WORKER_BASE_MODEL, _PARAMETER_WORKER_DEMAND_SCENARIOS
+    _PARAMETER_WORKER_BASE_MODEL = base_model
+    _PARAMETER_WORKER_DEMAND_SCENARIOS = demand_scenarios
+
+
+def evaluate_parameter_search_candidate(candidate: tuple[float, float, float]) -> dict[str, Any]:
+    if _PARAMETER_WORKER_BASE_MODEL is None or _PARAMETER_WORKER_DEMAND_SCENARIOS is None:
+        raise RuntimeError("Parameter search worker was not initialized.")
+
+    lambda_market, beta_capture, theta_competition = candidate
+    candidate_model = model_with_lambda(_PARAMETER_WORKER_BASE_MODEL, float(lambda_market))
+    candidate_rows, candidate_solution = optimize_dashboard_solution(
+        candidate_model,
+        OPTIMIZATION_FLEET,
+        float(beta_capture),
+        float(theta_competition),
+    )
+    scenario_scores = [
+        score_inventory_against_compact_demands(candidate_rows, scenario)
+        for scenario in _PARAMETER_WORKER_DEMAND_SCENARIOS
+    ]
+    score = summarize_scores(scenario_scores)
+    return {
+        "lambda_market": float(lambda_market),
+        "beta_capture": float(beta_capture),
+        "theta_competition": float(theta_competition),
+        "allocated_devices": int(candidate_solution["allocated_devices"]),
+        "active_zones": int(candidate_solution["active_zones"]),
+        "expected_rides": float(candidate_solution["expected_rides"]),
+        "expected_profit_krw": float(candidate_solution["expected_profit_krw"]),
+        "simulated_demand": int(round(score["avg_simulated_demand"])),
+        "served_rides": int(round(score["avg_served_rides"])),
+        "unmet_rides": int(round(score["avg_unmet_rides"])),
+        "avg_unmet_rides": float(score["avg_unmet_rides"]),
+        "total_unmet_rides": int(score["total_unmet_rides"]),
+        "service_rate": float(score["service_rate"]),
+        "unmet_rate": float(score["unmet_rate"]),
+        "shortage_zone_count": float(score["avg_shortage_zone_count"]),
+        "shortage_event_count": float(score["avg_shortage_event_count"]),
+        "best_trial_unmet_rides": int(score["best_trial_unmet_rides"]),
+        "worst_trial_unmet_rides": int(score["worst_trial_unmet_rides"]),
+    }
+
+
+def run_parameter_search(
+    processed_dir: Path,
+    trial_count: int = PARAMETER_SEARCH_TRIALS,
+    lambda_step: float = PARAMETER_SEARCH_LAMBDA_STEP,
+    beta_step: float = PARAMETER_SEARCH_BETA_STEP,
+    theta_step: float = PARAMETER_SEARCH_THETA_STEP,
+    *,
+    allow_long_run: bool = True,
+    max_workers: int | None = None,
+) -> dict[str, Any]:
+    trial_count = max(1, int(trial_count))
+    plan = parameter_search_plan(trial_count, lambda_step, beta_step, theta_step, max_workers)
+    if not allow_long_run:
+        return {
+            "ok": False,
+            "status": "dry_run_only",
+            "message": "Full-grid calibration was not started because allow_long_run=false.",
+            "objective": (
+                f"minimize average unmet rides across {trial_count} fixed "
+                "Origin-Destination Pair demand scenarios per parameter combination"
+            ),
+            "parallel_processing": True,
+            "parameter_ranges": {
+                "lambda_market": list(PARAMETER_SEARCH_LAMBDA_RANGE),
+                "beta_capture": list(PARAMETER_SEARCH_BETA_RANGE),
+                "theta_competition": list(PARAMETER_SEARCH_THETA_RANGE),
+            },
+            **plan,
+        }
+
+    base_model, meta = build_zone_model(processed_dir, LAMBDA_MARKET)
+    baseline_rows, baseline_solution = optimize_dashboard_solution(
+        base_model,
+        OPTIMIZATION_FLEET,
+        BETA_CAPTURE,
+        THETA_COMPETITION,
+    )
+    segments = load_clean_temporal_segments(processed_dir)
+    rate_rows, rate_meta = fit_temporal_od_rates(segments)
+    demand_scenarios: list[CompactDemandScenario] = []
+    demand_event_counts: list[int] = []
+    demand_meta_rows: list[dict[str, Any]] = []
+    for idx in range(trial_count):
+        demand_events, demand_meta = generate_temporal_demand_events(
+            rate_rows,
+            float(baseline_solution["expected_rides"]),
+            TEMPORAL_SIMULATION_SEED + idx,
+        )
+        demand_scenarios.append(compact_demand_scenario(demand_events))
+        demand_event_counts.append(len(demand_events))
+        demand_meta_rows.append(demand_meta)
+    baseline_scores = [
+        score_inventory_against_compact_demands(baseline_rows, scenario)
+        for scenario in demand_scenarios
+    ]
+    baseline_score = summarize_scores(baseline_scores)
+
+    lambdas, betas, thetas = parameter_grid_points(lambda_step, beta_step, theta_step)
+    parameter_combination_count = len(lambdas) * len(betas) * len(thetas)
+    candidate_grid = [
+        (float(lambda_market), float(beta_capture), float(theta_competition))
+        for lambda_market in lambdas
+        for beta_capture in betas
+        for theta_competition in thetas
+    ]
+    worker_count = parameter_search_worker_count(max_workers)
+    results: list[dict[str, Any]] = []
+    if worker_count <= 1:
+        init_parameter_search_worker(base_model, demand_scenarios)
+        for idx, candidate in enumerate(candidate_grid, start=1):
+            results.append(evaluate_parameter_search_candidate(candidate))
+            if idx % 500 == 0:
+                gc.collect()
+    else:
+        context = multiprocessing.get_context("spawn")
+        with ProcessPoolExecutor(
+            max_workers=worker_count,
+            mp_context=context,
+            initializer=init_parameter_search_worker,
+            initargs=(base_model, demand_scenarios),
+        ) as executor:
+            for idx, result in enumerate(
+                executor.map(
+                    evaluate_parameter_search_candidate,
+                    candidate_grid,
+                    chunksize=PARAMETER_SEARCH_CHUNK_SIZE,
+                ),
+                start=1,
+            ):
+                results.append(result)
+                if idx % 500 == 0:
+                    gc.collect()
+
+    results.sort(
+        key=lambda item: (
+            float(item["avg_unmet_rides"]),
+            float(item["shortage_zone_count"]),
+            -float(item["service_rate"]),
+            -float(item["expected_profit_krw"]),
+        )
+    )
+    ranked_results = [{**item, "rank": rank} for rank, item in enumerate(results, start=1)]
+    best = ranked_results[0] if ranked_results else {}
+
+    return {
+        "ok": True,
+        "objective": (
+            f"minimize average unmet rides across {trial_count} fixed "
+            "Origin-Destination Pair demand scenarios per parameter combination"
+        ),
+        "trial_count": int(trial_count),
+        "trials_per_parameter_combination": int(trial_count),
+        "parameter_combination_count": int(parameter_combination_count),
+        "case_count": int(parameter_combination_count * trial_count),
+        "estimated_runtime_seconds": plan["estimated_runtime_seconds"],
+        "estimated_runtime_hours": plan["estimated_runtime_hours"],
+        "estimated_parallel_runtime_seconds": plan["estimated_parallel_runtime_seconds"],
+        "estimated_parallel_runtime_hours": plan["estimated_parallel_runtime_hours"],
+        "observed_seconds_per_case": plan["observed_seconds_per_case"],
+        "cpu_count": plan["cpu_count"],
+        "reserved_cpu_cores": plan["reserved_cpu_cores"],
+        "worker_count": int(worker_count),
+        "chunk_size": plan["chunk_size"],
+        "parallel_strategy": plan["parallel_strategy"],
+        "parallel_processing": bool(worker_count > 1),
+        "sequential_processing": bool(worker_count <= 1),
+        "memory_control": (
+            "Demand scenarios are compacted once and copied only to worker initializers; "
+            "case-level movement logs are not stored during calibration."
+        ),
+        "parameter_ranges": {
+            "lambda_market": list(PARAMETER_SEARCH_LAMBDA_RANGE),
+            "beta_capture": list(PARAMETER_SEARCH_BETA_RANGE),
+            "theta_competition": list(PARAMETER_SEARCH_THETA_RANGE),
+        },
+        "parameter_steps": {
+            "lambda_market": float(lambda_step),
+            "beta_capture": float(beta_step),
+            "theta_competition": float(theta_step),
+        },
+        "parameter_grid_size": {
+            "lambda_market": len(lambdas),
+            "beta_capture": len(betas),
+            "theta_competition": len(thetas),
+        },
+        "baseline_parameters": {
+            "lambda_market": LAMBDA_MARKET,
+            "beta_capture": BETA_CAPTURE,
+            "theta_competition": THETA_COMPETITION,
+        },
+        "baseline_solution": baseline_solution,
+        "baseline_score": baseline_score,
+        "demand_scenario": {
+            "trial_count": int(trial_count),
+            "avg_simulated_demand": float(np.mean([row["simulated_demand"] for row in demand_meta_rows]))
+            if demand_meta_rows
+            else 0.0,
+            "avg_event_count": float(np.mean(demand_event_counts)) if demand_event_counts else 0.0,
+            "target_expected_rides": float(baseline_solution["expected_rides"]),
+            "uncalibrated_temporal_rate_total": float(demand_meta_rows[0]["uncalibrated_temporal_rate_total"])
+            if demand_meta_rows
+            else 0.0,
+            "demand_calibration_factor": float(demand_meta_rows[0]["demand_calibration_factor"])
+            if demand_meta_rows
+            else 1.0,
+            "rate_method": rate_meta,
+            "note": "The same set of 100 synthetic Origin-Destination Pair demand days is reused for every parameter combination so lower demand cannot win trivially.",
+        },
+        "best": best,
+        "top_results": ranked_results[:10],
+        "results": ranked_results,
+        "meta": meta,
     }
 
 
@@ -1434,6 +2097,148 @@ def temporal_simulation_panel(temporal: dict[str, Any], map_href: str) -> str:
     """
 
 
+def parameter_search_panel() -> str:
+    plan = parameter_search_plan(
+        PARAMETER_SEARCH_TRIALS,
+        PARAMETER_SEARCH_LAMBDA_STEP,
+        PARAMETER_SEARCH_BETA_STEP,
+        PARAMETER_SEARCH_THETA_STEP,
+    )
+    parameter_combination_count = int(plan["parameter_combination_count"])
+    case_count = int(plan["case_count"])
+    estimated_hours = float(plan["estimated_runtime_hours"])
+    return f"""
+      <h2>상수 Calibration Simulation: λ, β, θ Multi-start Search</h2>
+      <p>
+        현재 dashboard의 <code>λ={fmt_float(LAMBDA_MARKET, 2)}</code>, <code>β={fmt_float(BETA_CAPTURE, 2)}</code>,
+        <code>θ={fmt_float(THETA_COMPETITION, 2)}</code>는 설명용 baseline입니다. λ, β, θ grid 조합
+        {fmt_int(parameter_combination_count)}개와 조합별 {fmt_int(PARAMETER_SEARCH_TRIALS)}개 demand trial을 모두 곱하면
+        총 {fmt_int(case_count)} case입니다. Full-run은 현재 machine의 {fmt_int(plan["cpu_count"])}개 CPU 중
+        cron scheduler용 {fmt_int(plan["reserved_cpu_cores"])}개를 남기고 {fmt_int(plan["worker_count"])}개 worker로 병렬 실행합니다.
+      </p>
+      <div class="simulation-grid">
+        <div class="sim-card">
+          <b>Objective</b>
+          <span>같은 100개 synthetic Origin-Destination Pair demand day에서 평균 <code>unmet rides</code> 최소화</span>
+        </div>
+        <div class="sim-card">
+          <b>Parallel workers</b>
+          <span>{fmt_int(plan["worker_count"])}개 worker process가 parameter 조합을 나눠 계산합니다. Python GIL을 피해서 실제 CPU core를 사용합니다.</span>
+        </div>
+        <div class="sim-card">
+          <b>Search grid</b>
+          <span>λ {fmt_float(PARAMETER_SEARCH_LAMBDA_RANGE[0], 2)}-{fmt_float(PARAMETER_SEARCH_LAMBDA_RANGE[1], 2)} step {fmt_float(PARAMETER_SEARCH_LAMBDA_STEP, 3)}, β {fmt_float(PARAMETER_SEARCH_BETA_RANGE[0], 2)}-{fmt_float(PARAMETER_SEARCH_BETA_RANGE[1], 2)} step {fmt_float(PARAMETER_SEARCH_BETA_STEP, 3)}, θ {fmt_float(PARAMETER_SEARCH_THETA_RANGE[0], 2)}-{fmt_float(PARAMETER_SEARCH_THETA_RANGE[1], 2)} step {fmt_float(PARAMETER_SEARCH_THETA_STEP, 3)}</span>
+        </div>
+        <div class="sim-card">
+          <b>Runtime estimate</b>
+          <span>단일 worker 기준 약 {fmt_float(estimated_hours, 1)}시간, {fmt_int(plan["worker_count"])} worker 기준 단순 추정 약 {fmt_float(plan["estimated_parallel_runtime_hours"], 1)}시간입니다.</span>
+        </div>
+      </div>
+      <div class="action-row">
+        <button class="primary-button" type="button" id="parameter-search-start">Full-run 시뮬레이션 시작하기</button>
+        <span class="loading-pill" id="parameter-search-loading"><span class="spinner"></span>{fmt_int(plan["worker_count"])} worker로 {fmt_int(case_count)} case를 병렬 평가 중입니다. 완료 전까지 추가 request는 막힙니다.</span>
+      </div>
+      <div class="status-box" id="parameter-search-status">아직 실행하지 않았습니다. Full-run은 완료될 때까지 browser request가 열린 상태로 유지됩니다.</div>
+      <div id="parameter-search-result"></div>
+      <script>
+      (() => {{
+        const button = document.getElementById("parameter-search-start");
+        const loading = document.getElementById("parameter-search-loading");
+        const status = document.getElementById("parameter-search-status");
+        const result = document.getElementById("parameter-search-result");
+        let running = false;
+
+        const fmtInt = value => Math.round(Number(value || 0)).toLocaleString();
+        const fmtFloat = (value, digits = 2) => Number(value || 0).toLocaleString(undefined, {{
+          minimumFractionDigits: digits,
+          maximumFractionDigits: digits,
+        }});
+        const setRunning = value => {{
+          running = value;
+          if (button) button.disabled = value;
+          if (loading) loading.classList.toggle("active", value);
+        }};
+        const setStatus = (message, isError = false) => {{
+          if (!status) return;
+          status.textContent = message;
+          status.classList.toggle("error", isError);
+        }};
+        const renderResults = data => {{
+          const best = data.best || {{}};
+          const rows = (data.top_results || []).map(item => `
+            <tr>
+              <td>${{item.rank}}</td>
+              <td>${{fmtFloat(item.lambda_market, 3)}}</td>
+              <td>${{fmtFloat(item.beta_capture, 3)}}</td>
+              <td>${{fmtFloat(item.theta_competition, 3)}}</td>
+              <td>${{fmtFloat(item.avg_unmet_rides ?? item.unmet_rides, 1)}}</td>
+              <td>${{fmtInt(item.total_unmet_rides)}}</td>
+              <td>${{fmtFloat(item.served_rides, 1)}}</td>
+              <td>${{fmtFloat(item.service_rate * 100, 1)}}%</td>
+              <td>${{fmtFloat(item.shortage_zone_count, 1)}}</td>
+              <td>${{fmtFloat(item.expected_rides, 1)}}</td>
+            </tr>
+          `).join("");
+          result.innerHTML = `
+            <div class="grid three" style="margin-top:14px;">
+              <div class="metric"><div class="label">Best λ</div><div class="value">${{fmtFloat(best.lambda_market, 3)}}</div></div>
+              <div class="metric"><div class="label">Best β</div><div class="value">${{fmtFloat(best.beta_capture, 3)}}</div></div>
+              <div class="metric"><div class="label">Best θ</div><div class="value">${{fmtFloat(best.theta_competition, 3)}}</div></div>
+              <div class="metric"><div class="label">Avg unmet rides</div><div class="value">${{fmtFloat(best.avg_unmet_rides ?? best.unmet_rides, 1)}}</div></div>
+              <div class="metric"><div class="label">Service rate</div><div class="value">${{fmtFloat(best.service_rate * 100, 1)}}%</div></div>
+              <div class="metric"><div class="label">Total cases</div><div class="value">${{fmtInt(data.case_count)}}</div></div>
+              <div class="metric"><div class="label">Workers</div><div class="value">${{fmtInt(data.worker_count)}}</div></div>
+            </div>
+            <div class="table-wrap compact-table sim-table">
+              <table>
+                <thead>
+                  <tr><th>Rank</th><th>λ</th><th>β</th><th>θ</th><th>Avg unmet</th><th>Total unmet</th><th>Avg served</th><th>Service</th><th>Shortage zones</th><th>Expected rides</th></tr>
+                </thead>
+                <tbody>${{rows}}</tbody>
+              </table>
+            </div>
+          `;
+        }};
+
+        if (button) button.addEventListener("click", async () => {{
+          if (running) return;
+          setRunning(true);
+          result.innerHTML = "";
+          setStatus("Full-run request submitted. 서버에서 parameter 조합을 worker pool로 나눠 계산하고 있습니다.");
+          try {{
+            const response = await fetch("./api/parameter-search", {{
+              method: "POST",
+              headers: {{ "Content-Type": "application/json" }},
+              body: JSON.stringify({{
+                trial_count: {PARAMETER_SEARCH_TRIALS},
+                lambda_step: {PARAMETER_SEARCH_LAMBDA_STEP},
+                beta_step: {PARAMETER_SEARCH_BETA_STEP},
+                theta_step: {PARAMETER_SEARCH_THETA_STEP},
+                allow_long_run: true,
+                max_workers: {plan["worker_count"]}
+              }}),
+            }});
+            const data = await response.json().catch(() => ({{ ok: false, error: "Invalid JSON response" }}));
+            if (!response.ok || !data.ok) {{
+              const message = response.status === 409
+                ? "이미 다른 calibration simulation이 실행 중입니다. 완료 후 다시 시도하세요."
+                : (data.error || "Simulation endpoint를 실행할 수 없습니다. serve_visualizations.py 서버가 필요합니다.");
+              setStatus(message, true);
+              return;
+            }}
+            renderResults(data);
+            setStatus(`완료: ${{data.parameter_combination_count.toLocaleString()}}개 parameter 조합 × ${{data.trials_per_parameter_combination.toLocaleString()}}개 trial = ${{data.case_count.toLocaleString()}} case를 ${{data.worker_count.toLocaleString()}} worker로 평가했습니다.`);
+          }} catch (error) {{
+            setStatus(`Simulation request 실패: ${{error.message}}`, true);
+          }} finally {{
+            setRunning(false);
+          }}
+        }});
+      }})();
+      </script>
+    """
+
+
 def decision_variable_table() -> str:
     rows = [
         (r"\(x_i\)", r"\(x_i \in \mathbb{Z}_{+}\) 또는 \(x_i \ge 0\)", "04:00에 zone i에 배치할 GBIKE PM 수"),
@@ -1655,6 +2460,15 @@ def render_html(
     .sim-card b {{ display: block; margin-bottom: 5px; color: var(--ink); }}
     .sim-card span {{ display: block; color: var(--muted); font-size: 13px; line-height: 1.55; }}
     .sim-table {{ margin-top: 12px; max-height: none; }}
+    .action-row {{ display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-top: 14px; }}
+    .primary-button {{ border: 1px solid var(--green); background: var(--green); color: #fff; border-radius: 8px; padding: 10px 14px; font-weight: 800; cursor: pointer; }}
+    .primary-button[disabled] {{ cursor: not-allowed; opacity: .58; }}
+    .loading-pill {{ display: none; align-items: center; gap: 8px; color: var(--muted); font-size: 13px; }}
+    .loading-pill.active {{ display: inline-flex; }}
+    .spinner {{ width: 16px; height: 16px; border: 2px solid #cbd5e1; border-top-color: var(--green); border-radius: 999px; animation: spin .8s linear infinite; }}
+    @keyframes spin {{ to {{ transform: rotate(360deg); }} }}
+    .status-box {{ margin-top: 12px; border: 1px solid var(--line); border-radius: 8px; background: #f8fafc; padding: 12px 13px; color: var(--muted); font-size: 13px; line-height: 1.55; }}
+    .status-box.error {{ border-color: #fecdd3; background: #fff1f2; color: #9f1239; }}
     .temporal-map-frame {{ width: 100%; height: 720px; border: 1px solid var(--line); border-radius: 8px; background: #fff; margin-top: 16px; }}
     table {{ width: 100%; border-collapse: collapse; font-size: 13px; }}
     th, td {{ border-bottom: 1px solid var(--line); padding: 9px 8px; text-align: right; vertical-align: top; }}
@@ -1780,6 +2594,10 @@ def render_html(
 
     <section class="card result" style="margin-top:16px;">
       {temporal_simulation_panel(temporal, temporal_map_href)}
+    </section>
+
+    <section class="card result" style="margin-top:16px;">
+      {parameter_search_panel()}
     </section>
   </main>
 </body>

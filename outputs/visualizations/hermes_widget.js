@@ -11,7 +11,7 @@
   const cssUrl = new URL("hermes_widget.css", scriptUrl);
   if (scriptUrl.search) cssUrl.search = scriptUrl.search;
   const configuredBridge = window.HERMES_BRIDGE_URL || localStorage.getItem("hermesBridgeUrl") || "";
-  const sameOriginBridge = window.location.protocol.startsWith("http") && window.location.port === "8787" ? window.location.origin : "";
+  const sameOriginBridge = window.location.protocol.startsWith("http") ? window.location.origin : "";
   const bridgeUrl = (configuredBridge || sameOriginBridge || "http://127.0.0.1:8787").replace(/\/+$/, "");
   const mode = window.HERMES_AGENT_MODE || document.documentElement.dataset.hermesMode || document.body.dataset.hermesMode || "read";
   const isLab = mode === "lab";
@@ -138,6 +138,29 @@
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
       let buffer = "";
+      let finished = false;
+      let assistantHasAnswer = false;
+
+      function showAssistantStatus(text) {
+        if (assistantHasAnswer) return;
+        const next = (text || "처리 중").trim();
+        if (!next) return;
+        assistant.dataset.placeholder = "status";
+        assistant.textContent = next;
+        log.scrollTop = log.scrollHeight;
+      }
+
+      function appendAssistantDelta(text) {
+        if (!text) return;
+        if (!assistantHasAnswer) {
+          assistant.textContent = "";
+          assistantHasAnswer = true;
+          delete assistant.dataset.placeholder;
+        }
+        assistant.textContent += text;
+        log.scrollTop = log.scrollHeight;
+      }
+
       while (true) {
         const chunk = await reader.read();
         if (chunk.done) break;
@@ -146,23 +169,34 @@
         buffer = parsed.rest;
         parsed.events.map(parseSse).forEach((event) => {
           if (event.type === "delta") {
-            assistant.textContent += event.json.text || "";
-            log.scrollTop = log.scrollHeight;
+            appendAssistantDelta(event.json.text || "");
           } else if (event.type === "status") {
             status.textContent = event.json.text || "처리 중";
+            showAssistantStatus(event.json.text || "처리 중");
           } else if (event.type === "error") {
             assistant.classList.add("error");
             assistant.textContent = event.json.text || "에이전트 연결 오류";
+            assistantHasAnswer = true;
+            delete assistant.dataset.placeholder;
           } else if (event.type === "done") {
-            if (!assistant.textContent.trim() && event.json.text) assistant.textContent = event.json.text;
+            if ((!assistantHasAnswer || assistant.dataset.placeholder === "status") && event.json.text) {
+              assistant.textContent = event.json.text;
+              assistantHasAnswer = true;
+              delete assistant.dataset.placeholder;
+            }
             if (event.json.sessionId) setCurrentSessionId(event.json.sessionId);
             status.textContent = "연결됨";
+            finished = true;
             if (isLab) {
               window.dispatchEvent(new CustomEvent("hermes-lab-refresh-needed"));
               window.dispatchEvent(new CustomEvent("hermes-lab-saves-refresh-needed"));
             }
           }
         });
+        if (finished) {
+          await reader.cancel().catch(() => {});
+          break;
+        }
       }
     } catch (error) {
       assistant.classList.add("error");

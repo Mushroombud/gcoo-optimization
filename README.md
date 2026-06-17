@@ -24,6 +24,7 @@
 | `outputs/visualizations/temporal_inventory_shortages.csv` | Origin-Destination Pair 기반 하루 재고 simulation에서 PM 부족이 발생한 시간대/zone 기록 |
 | `outputs/visualizations/temporal_inventory_hourly_summary.csv` | Origin-Destination Pair 기반 하루 재고 simulation의 시간대별 수요/처리/미처리 summary |
 | `outputs/visualizations/temporal_inventory_od_movements.csv` | 시간대별 simulated Origin-Destination Pair demand, served movement, unmet movement, random shock 기록 |
+| `outputs/visualizations/parameter_search_results.json` | λ, β, θ multi-start calibration simulation 결과 |
 | `outputs/visualizations/sejong_map.html` | 최신 PM 위치와 ride/Origin-Destination Pair 기반 지도 |
 | `outputs/visualizations/sejong_charts_dashboard.html` | 수집량, 공급자별 현황, battery/activity chart |
 
@@ -219,6 +220,29 @@ S_{i,t+1}=S_{i,t}-\text{served departures}_{i,t}+\text{served arrivals}_{i,t}
 `optimization_model.html`의 맨 아래에는 `temporal_inventory_map.html`을 iframe으로 넣어, Sejong 지도 위에서 시간대별 Origin-Destination Pair 이동과 500m grid 재고를 animation으로 보여줍니다. 지도는 peak shortage hour를 첫 화면으로 열고, 붉은 500m grid는 PM 부족 origin, 초록 선과 화살표는 처리된 Origin-Destination Pair movement, 파란 점은 destination inflow를 뜻합니다. 전체 shortage 기록은 `temporal_inventory_shortages.csv`에 저장되고, 전체 simulated Origin-Destination Pair movement와 random shock audit trail은 `temporal_inventory_od_movements.csv`에 저장됩니다.
 
 두 simulation 모두 solver를 대체하는 algorithm이 아니라, 선택된 배치안의 robustness와 운영상 약점을 검증하는 단계입니다.
+
+### 6.3 λ, β, θ Calibration Simulation
+
+`λ`, `β`, `θ`는 dashboard baseline parameter이지만, 값이 arbitrary해 보이면 모델 설득력이 떨어집니다. 그래서 `optimization_model.html` 하단에 **상수 Calibration Simulation** section을 추가했습니다.
+
+이 section은 버튼을 눌렀을 때 로컬 visualization server의 `POST /api/parameter-search` endpoint를 호출합니다. 서버는 `λ`, `β`, `θ` grid 조합을 만들고, 각 조합마다 100개의 demand trial을 실행합니다. 현재 기본 grid는 `λ` 0.05 단위, `β` 0.005 단위, `θ` 0.05 단위이며, 총 28,675개 parameter 조합과 2,867,500개 case가 만들어집니다.
+
+Full-run은 허용됩니다. 다만 Python의 `threading`은 CPU-bound 계산에서 GIL 때문에 core를 충분히 쓰기 어렵기 때문에, 구현은 `ProcessPoolExecutor` 기반 worker pool을 사용합니다. 기본 worker 수는 `os.cpu_count() - 2`이며, 현재 12 CPU 환경에서는 cron scheduler용 2개 core를 남기고 10 worker가 parameter 조합을 나눠 계산합니다. 단일 worker 기준 100 case / 4초 benchmark라면 단순 추정 31.9시간이고, 10 worker 기준 이론 추정은 약 3.2시간입니다.
+
+OOM 방지를 위해 demand scenario는 worker 초기화 시 compact representation으로 한 번만 전달하고, calibration 중에는 case-level movement log를 저장하지 않습니다. 메모리에 유지하는 것은 demand scenario set, worker별 compact copy, 그리고 parameter 조합별 summary 결과입니다.
+
+```text
+1. λ, β, θ grid candidate를 하나 선택한다.
+2. 해당 parameter로 A_i와 Q_i(x_i)를 다시 계산한다.
+3. fleet F=2,800 제약 아래 x* 배치를 다시 구한다.
+4. 모든 candidate에 동일한 100개 synthetic Origin-Destination Pair demand day set을 적용한다.
+5. 각 demand trial마다 하루 재고 simulation을 돌려 unmet rides를 계산한다.
+6. 100개 trial 평균 unmet rides가 가장 작은 candidate를 best parameter로 선택한다.
+```
+
+낮은 parameter가 demand 자체를 줄여 이기는 문제를 피하기 위해, 모든 parameter 조합은 같은 100개 demand scenario set으로 scoring합니다. 즉, parameter는 “수요를 작게 만드는 능력”이 아니라 “같은 수요를 더 잘 처리하는 배치를 만드는 능력”으로 비교됩니다.
+
+Frontend에서는 `Full-run 시뮬레이션 시작하기` 버튼을 누르면 loading indicator가 돌고 버튼이 disabled 됩니다. Backend도 lock을 사용하므로 이미 실행 중인 request가 있으면 추가 request는 `409`로 거절됩니다. 완료되면 결과는 화면에 표시되고, `outputs/visualizations/parameter_search_results.json`에도 저장됩니다.
 
 ---
 

@@ -748,25 +748,93 @@ unmet_{i,t}
 
 ---
 
-## 11. 현재 Dashboard Run 결과
+## 11. λ, β, θ Calibration Simulation
+
+`λ`, `β`, `θ`는 non-linear demand capture 구조의 핵심 상수다. 기존 dashboard baseline은 `λ=0.30`, `β=0.08`, `θ=1.00`을 사용하지만, 이 값들은 외부 운영 데이터로 직접 추정된 값이 아니므로 arbitrary해 보일 수 있다.
+
+이를 보완하기 위해 `optimization_model.html` 하단에 **상수 Calibration Simulation** section을 추가했다. 이 section은 버튼을 누를 때만 local visualization server의 `POST /api/parameter-search` endpoint를 호출한다. Full-grid run은 허용하되, CPU-bound Python 계산에서 실제 core를 쓰기 위해 `ProcessPoolExecutor` 기반 worker pool로 parameter 조합을 병렬 평가한다.
+
+### 11.1 목적함수
+
+parameter calibration의 목적은 profit을 다시 최대화하는 것이 아니라, 같은 synthetic operating day set에서 공급 부족을 최소화하는 것이다.
+
+```math
+\min_{\lambda,\beta,\theta} \sum_t \sum_i unmet_{i,t}
+```
+
+여기서 `unmet_{i,t}`는 시간대 `t`, origin zone `i`에서 수요는 있었지만 재고 부족으로 처리하지 못한 ride 수다.
+
+### 11.2 실행 방식
+
+`λ`, `β`, `θ`를 작은 step 단위 grid로 열거한다. 현재 기본 grid는 `λ` 0.05 단위, `β` 0.005 단위, `θ` 0.05 단위다. 그 결과 28,675개 parameter 조합이 만들어지고, 각 조합마다 100개 demand trial을 실행하면 총 2,867,500개 case가 된다.
+
+현재 local benchmark가 100 case / 4초라면 2,867,500개 case는 단일 worker 기준 약 114,700초, 즉 약 31.9시간이 필요하다. 현재 12 CPU 환경에서는 cron scheduler가 사용할 2개 core를 남기고 10 worker를 사용하므로, 단순 병렬 추정은 약 3.2시간이다. 실제 runtime은 process spawn, worker별 pandas copy, OS scheduling, candidate별 계산 편차 때문에 달라질 수 있다.
+
+Python `threading`은 GIL 때문에 CPU-bound loop를 여러 core에 잘 분산하지 못한다. 따라서 구현상으로는 thread가 아니라 process worker pool을 사용한다. dashboard에서는 multi-core full-run으로 표현하며, 내부적으로는 worker process가 parameter candidate를 나눠 처리한다.
+
+| Parameter | Search range | Step | Grid count | 의미 |
+| --- | ---: | ---: | ---: | --- |
+| `λ` | 0.00 - 1.20 | 0.05 | 25 | 경쟁사 존재를 market validation으로 반영하는 강도 |
+| `β` | 0.02 - 0.20 | 0.005 | 37 | GBIKE 배치량이 수요 capture로 전환되는 속도 |
+| `θ` | 0.00 - 1.50 | 0.05 | 31 | 경쟁 공급량이 GBIKE capture를 약화시키는 정도 |
+
+각 trial은 다음 순서로 실행된다.
+
+```text
+1. λ, β, θ grid candidate를 하나 선택한다.
+2. A_i = D_i(1 + λ competition_index_i)를 다시 계산한다.
+3. Q_i(x_i)의 β, θ를 해당 candidate 값으로 바꾼다.
+4. fleet F=2,800 제약 아래 x*를 다시 계산한다.
+5. 모든 candidate에 동일한 100개 Origin-Destination Pair demand scenario set을 적용한다.
+6. 각 demand trial마다 시간대별 재고 simulation을 돌려 unmet rides를 계산한다.
+7. 100개 trial의 평균 unmet rides가 가장 작은 candidate를 best parameter로 선택한다.
+```
+
+중요한 점은 모든 parameter 조합이 **같은 100개 demand scenario set**으로 평가된다는 것이다. 그렇지 않으면 낮은 `λ` 또는 낮은 `β`가 demand 자체를 작게 만들어 unmet rides를 줄이는 것처럼 보일 수 있다. 현재 구현은 demand scenario set을 고정하고, parameter가 만드는 배치안 `x*`만 바꿔서 비교한다.
+
+### 11.3 Frontend/Backend Control
+
+Frontend의 `Full-run 시뮬레이션 시작하기` 버튼을 누르면 loading indicator가 켜지고 버튼이 disabled 된다. 완료 전까지 같은 page에서 추가 request를 보낼 수 없다.
+
+Backend도 `threading.Lock`으로 동일 endpoint의 동시 실행을 막는다. 이미 실행 중인 request가 있으면 `409`를 반환한다. Full-run은 `os.cpu_count() - 2` worker로 실행되며, 요청에서 `max_workers`를 넘기면 해당 값을 상한 내에서 사용할 수 있다.
+
+OOM 방지를 위해 2,867,500개 case를 한 번에 메모리에 쌓지 않는다. 100개 Origin-Destination Pair demand scenario는 compact representation으로 변환한 뒤 worker 초기화 시 전달하고, 각 worker는 parameter 조합을 맡아 summary만 반환한다. case-level movement log는 calibration 중 저장하지 않는다. 완료 후 다음 항목을 `parameter_search_results.json`에 저장한다.
+
+| 저장 항목 | 의미 |
+| --- | --- |
+| `parameter_combination_count` | 평가한 λ/β/θ grid 조합 수 |
+| `trials_per_parameter_combination` | 각 parameter 조합별 demand simulation 반복 횟수 |
+| `case_count` | 전체 평가 case 수 |
+| `estimated_runtime_seconds` | 현재 benchmark 기준 예상 실행 시간 |
+| `worker_count` | calibration에 사용한 worker process 수 |
+| `reserved_cpu_cores` | cron scheduler 등을 위해 남긴 CPU core 수 |
+| `baseline_score` | 기존 `λ=0.30`, `β=0.08`, `θ=1.00` 기준 평균 unmet rides |
+| `best` | 평균 unmet rides가 가장 낮은 parameter 조합 |
+| `top_results` | 상위 10개 parameter 조합 |
+
+이 calibration layer는 “현재 baseline parameter가 틀렸다”는 최종 결론을 자동으로 내리는 장치가 아니다. 기존 상수값을 고정 assumption으로 두지 않고, unmet ride 기준으로 재검증할 수 있게 하는 장치다.
+
+---
+
+## 12. 현재 Dashboard Run 결과
 
 `outputs/visualizations/optimization_model.html`은 위 모델을 시각화한다. 현재 생성된 dashboard run의 기준은 다음과 같다.
 
 | 항목 | 값 |
 | --- | ---: |
-| dashboard latest timestamp | 2026-06-18T02:35:08+0900 |
+| dashboard latest timestamp | 2026-06-18T03:05:10+0900 |
 | model zones | 356 |
 | GBIKE devices in snapshot | 2,823 |
 | ALPACA devices in snapshot | 1,368 |
 | optimization fleet `F` | 2,800 |
 | allocated devices | 2,800 |
-| active zones | 226 |
-| expected rides | 4,338.1 |
-| expected revenue | 9,543,865 KRW |
-| expected variable cost | 1,301,436 KRW |
+| active zones | 241 |
+| expected rides | 3,695.9 |
+| expected revenue | 8,131,077 KRW |
+| expected variable cost | 1,108,783 KRW |
 | expected fixed cost | 7,000,000 KRW |
-| expected rebalancing cost | 3,441,730 KRW |
-| expected profit / Objective value | -2,199,301 KRW |
+| expected rebalancing cost | 2,992,038 KRW |
+| expected profit / Objective value | -2,969,744 KRW |
 
 Origin-Destination Pair 기반 하루 재고 simulation의 현재 결과는 다음과 같다.
 
@@ -774,22 +842,22 @@ Origin-Destination Pair 기반 하루 재고 simulation의 현재 결과는 다�
 | --- | ---: |
 | initial GCOO `P*` supply | 2,800 |
 | initial ALPACA latest supply | 1,368 |
-| target `Q(x*)` rides | 4,338.1 |
+| target `Q(x*)` rides | 3,695.9 |
 | modeled Origin-Destination Pairs | 3,221 |
-| demand calibration factor | 1.37 |
-| simulated combined demand | 4,237 |
-| served rides | 3,477 |
-| unmet rides | 760 |
-| service rate | 82.1% |
-| shortage zones | 77 |
-| shortage events | 325 |
+| demand calibration factor | 1.16 |
+| simulated combined demand | 3,711 |
+| served rides | 2,969 |
+| unmet rides | 742 |
+| service rate | 80.0% |
+| shortage zones | 73 |
+| shortage events | 301 |
 | peak shortage hour | 16:00-17:00 |
 
 전처리 최신 시각과 dashboard run 시각이 다를 수 있다. 이는 데이터 수집이 계속 진행되는 동안 visualization이 특정 snapshot 기준으로 생성되기 때문이다. 보고서에는 반드시 "전처리 최신 데이터 기준"과 "dashboard run 기준"을 구분해서 적는 것이 좋다.
 
 ---
 
-## 12. Competitor 또는 신규 진입자 모델 확장
+## 13. Competitor 또는 신규 진입자 모델 확장
 
 ALPACA 또는 신규 진입자는 GBIKE 배치를 외생 변수로 관찰하고 자기 배치를 최적화한다고 볼 수 있다.
 
