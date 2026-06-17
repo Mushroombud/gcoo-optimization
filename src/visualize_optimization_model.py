@@ -10,6 +10,7 @@ import pandas as pd
 from folium.plugins import Fullscreen, MiniMap
 
 from common import ensure_dir, write_json
+from hermes_embed import inject_hermes_widget
 
 
 LAMBDA_MARKET = 0.30
@@ -673,6 +674,7 @@ def render_model_map(rows: pd.DataFrame, out_path: Path) -> None:
     Fullscreen(position="topright").add_to(m)
     folium.LayerControl(collapsed=False).add_to(m)
     m.save(str(out_path))
+    inject_hermes_widget(out_path)
 
 
 def render_html(rows: pd.DataFrame, meta: dict[str, Any], solution: dict[str, Any], out_path: Path) -> None:
@@ -867,6 +869,7 @@ def render_html(rows: pd.DataFrame, meta: dict[str, Any], solution: dict[str, An
 </html>
 """
     out_path.write_text(html_text, encoding="utf-8")
+    inject_hermes_widget(out_path)
 
 
 def render(processed_dir: Path, out_dir: Path) -> dict[str, Any]:

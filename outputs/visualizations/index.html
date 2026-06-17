@@ -14,6 +14,7 @@
       --seoul: #176b87;
       --sejong: #6d5f15;
       --model: #0f766e;
+      --lab: #7c2d12;
     }
     * { box-sizing: border-box; }
     body {
@@ -99,6 +100,7 @@
     }
     .sejong a { color: var(--sejong); }
     .model a { color: var(--model); }
+    .lab a { color: var(--lab); }
     .feature {
       display: grid;
       grid-template-columns: 1.1fr 0.9fr;
@@ -160,6 +162,13 @@ maximize Eₛ[Σᵢ(pᵢ-v)Qᵢₛ(xᵢ) - Σᵢcᵢxᵢ - Σᵢrᵢ(xᵢ)]</pre
       </nav>
     </section>
 
+    <section class="lab">
+      <h2>에이전트 실험실</h2>
+      <nav>
+        <a href="./hermes_lab.html">실험실 열기<span>자연어로 모델, 변수, 시각화를 바꾸고 상태 저장과 되돌리기를 실행</span></a>
+      </nav>
+    </section>
+
     <section class="seoul">
       <h2>서울시 따릉이 기반 시각화</h2>
       <nav>
@@ -178,5 +187,6 @@ maximize Eₛ[Σᵢ(pᵢ-v)Qᵢₛ(xᵢ) - Σᵢcᵢxᵢ - Σᵢrᵢ(xᵢ)]</pre
       </nav>
     </section>
   </main>
+  <script defer src="./hermes_widget.js"></script>
 </body>
 </html>

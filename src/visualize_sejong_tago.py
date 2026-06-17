@@ -13,6 +13,7 @@ from pyecharts import options as opts
 from pyecharts.charts import Bar, Line, Page, Scatter
 
 from common import ensure_dir, write_json
+from hermes_embed import inject_hermes_widget
 
 
 OPERATOR_COLORS = {
@@ -264,6 +265,7 @@ def render_chart_dashboard(tables: dict[str, pd.DataFrame], out_path: Path) -> N
         make_battery_scatter(tables["latest"]),
     )
     page.render(str(out_path))
+    inject_hermes_widget(out_path)
 
 
 def operator_color(operator_name: Any) -> str:
@@ -771,6 +773,7 @@ def render_map(
     Fullscreen(position="topright").add_to(m)
     folium.LayerControl(collapsed=False).add_to(m)
     m.save(str(out_path))
+    inject_hermes_widget(out_path)
     return {
         "latest_rows": int(len(latest)),
         "zone_markers": int(zone_count),

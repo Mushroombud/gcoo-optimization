@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="ko" data-hermes-mode="lab">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>GCOO 실험실</title>
+  <link rel="stylesheet" href="./hermes_widget.css">
+</head>
+<body class="hermes-lab-shell" data-hermes-mode="lab" data-hermes-sidebar="true" data-hermes-auto-open="true">
+  <header class="hermes-lab-header">
+    <h1 class="hermes-lab-title">실험실</h1>
+    <span class="hermes-status" data-hermes-lab-status>대기</span>
+    <nav class="hermes-lab-actions" aria-label="Lab actions">
+      <a href="./index.html">허브</a>
+    </nav>
+  </header>
+  <iframe
+    class="hermes-lab-frame"
+    data-hermes-lab-frame
+    src="./hermes_lab_workspace/optimization_model.html"
+    title="에이전트 실험실 최적화 모델"
+  ></iframe>
+  <script>
+    window.HERMES_AGENT_MODE = "lab";
+  </script>
+  <script defer src="./hermes_widget.js"></script>
+</body>
+</html>

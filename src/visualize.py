@@ -16,6 +16,7 @@ from pyecharts import options as opts
 from pyecharts.charts import Bar, Line, Page, Scatter
 
 from common import ensure_dir, write_json
+from hermes_embed import inject_hermes_widget
 from prototype_pipeline import make_fixture_dongs
 
 
@@ -484,6 +485,7 @@ def render_chart_dashboard(
         out_path,
         operator_move_exclusion_section(operator_move_exclusion_summary()),
     )
+    inject_hermes_widget(out_path)
 
 
 def load_geojson(path: Path | None) -> dict[str, Any]:
@@ -1453,6 +1455,7 @@ def render_map(
     folium.LayerControl(collapsed=False).add_to(m)
     m.save(str(out_path))
     inject_script_at_html_end(out_path, dong_hover_script(dong_layer_name))
+    inject_hermes_widget(out_path)
     return {
         "boundary_source": "geojson" if geojson_path and geojson_path.exists() else "fixture_bbox",
         "tago_point_rows": int(len(tago_points)),

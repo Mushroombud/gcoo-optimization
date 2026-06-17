@@ -1,0 +1,612 @@
+:root {
+  --hermes-ink: #172033;
+  --hermes-muted: #64748b;
+  --hermes-line: #d9e0ea;
+  --hermes-panel: #ffffff;
+  --hermes-green: #0f766e;
+  --hermes-blue: #2563eb;
+  --hermes-red: #be123c;
+}
+
+.hermes-fab {
+  position: fixed;
+  right: 22px;
+  bottom: 22px;
+  z-index: 2147483000;
+  width: 60px;
+  height: 60px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 50%;
+  background: var(--hermes-green);
+  color: #fff;
+  box-shadow: 0 12px 28px rgba(15, 118, 110, 0.28);
+  cursor: pointer;
+  transition: transform 140ms ease, box-shadow 140ms ease;
+}
+
+.hermes-fab:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 16px 34px rgba(15, 118, 110, 0.34);
+}
+
+.hermes-icon {
+  width: 18px;
+  height: 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+}
+
+.hermes-icon svg {
+  width: 100%;
+  height: 100%;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.hermes-fab .hermes-icon {
+  width: 29px;
+  height: 29px;
+}
+
+.hermes-sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.hermes-panel {
+  position: fixed;
+  right: 22px;
+  bottom: 92px;
+  z-index: 2147483000;
+  width: min(390px, calc(100vw - 32px));
+  height: min(620px, calc(100vh - 126px));
+  display: none;
+  grid-template-rows: auto auto 1fr auto;
+  border: 1px solid var(--hermes-line);
+  border-radius: 8px;
+  background: var(--hermes-panel);
+  box-shadow: 0 18px 46px rgba(15, 23, 42, 0.22);
+  overflow: hidden;
+  color: var(--hermes-ink);
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+.hermes-panel.open {
+  display: grid;
+}
+
+.hermes-lab-shell[data-hermes-sidebar="true"] {
+  padding-right: 400px;
+}
+
+.hermes-sidebar-panel {
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 400px;
+  max-width: 400px;
+  height: 100vh;
+  display: grid;
+  grid-template-rows: auto auto auto minmax(0, 1fr) auto;
+  border-top: 0;
+  border-right: 0;
+  border-bottom: 0;
+  border-radius: 0;
+  box-shadow: -12px 0 32px rgba(15, 23, 42, 0.14);
+}
+
+.hermes-sidebar-panel.open {
+  display: grid;
+}
+
+.hermes-panel header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--hermes-line);
+  background: #fff;
+}
+
+.hermes-brand {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.hermes-agent-mark {
+  width: 34px;
+  height: 34px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  border-radius: 8px;
+  background: #e6f4f1;
+  color: var(--hermes-green);
+}
+
+.hermes-title-stack {
+  min-width: 0;
+}
+
+.hermes-title {
+  min-width: 0;
+  font-size: 15px;
+  font-weight: 800;
+}
+
+.hermes-status {
+  max-width: 168px;
+  margin-top: 2px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--hermes-muted);
+  font-size: 12px;
+}
+
+.hermes-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.hermes-icon-button,
+.hermes-send {
+  width: 36px;
+  height: 36px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--hermes-line);
+  border-radius: 8px;
+  background: #fff;
+  color: var(--hermes-ink);
+  cursor: pointer;
+  transition: background 140ms ease, border-color 140ms ease, color 140ms ease;
+}
+
+.hermes-icon-button:hover,
+.hermes-icon-button.active {
+  border-color: #9cc9c3;
+  background: #ecfdf5;
+  color: var(--hermes-green);
+}
+
+.hermes-close:hover {
+  border-color: #fecdd3;
+  background: #fff1f2;
+  color: var(--hermes-red);
+}
+
+.hermes-session-list {
+  display: none;
+  max-height: 210px;
+  overflow: auto;
+  padding: 10px;
+  border-bottom: 1px solid var(--hermes-line);
+  background: #f8fafc;
+}
+
+.hermes-session-list.open {
+  display: grid;
+  gap: 7px;
+}
+
+.hermes-session-heading {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 2px 2px 5px;
+  color: var(--hermes-muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.hermes-session-item {
+  width: 100%;
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: center;
+  gap: 9px;
+  margin: 0;
+  padding: 9px 10px;
+  border: 1px solid var(--hermes-line);
+  border-radius: 8px;
+  background: #fff;
+  color: var(--hermes-ink);
+  text-align: left;
+  cursor: pointer;
+}
+
+.hermes-session-item:hover {
+  border-color: #9cc9c3;
+}
+
+.hermes-session-copy {
+  min-width: 0;
+  display: block;
+}
+
+.hermes-session-copy b,
+.hermes-session-copy > span {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hermes-session-copy b {
+  font-size: 12px;
+}
+
+.hermes-session-copy > span {
+  margin-top: 3px;
+  color: var(--hermes-muted);
+  font-size: 12px;
+}
+
+.hermes-session-empty {
+  padding: 8px 10px;
+  color: var(--hermes-muted);
+  font-size: 12px;
+}
+
+.hermes-save-panel {
+  display: grid;
+  gap: 9px;
+  padding: 12px;
+  border-bottom: 1px solid var(--hermes-line);
+  background: #fff;
+}
+
+.hermes-save-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.hermes-save-button {
+  min-width: 0;
+  height: 36px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  border: 1px solid var(--hermes-line);
+  border-radius: 8px;
+  background: #fff;
+  color: var(--hermes-ink);
+  cursor: pointer;
+  font: 800 13px/1 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+.hermes-save-button.primary {
+  border-color: var(--hermes-green);
+  background: var(--hermes-green);
+  color: #fff;
+}
+
+.hermes-save-button:disabled,
+.hermes-icon-button:disabled {
+  opacity: 0.48;
+  cursor: not-allowed;
+}
+
+.hermes-save-status {
+  min-height: 16px;
+  color: var(--hermes-muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.hermes-save-timeline {
+  position: relative;
+  max-height: 210px;
+  overflow: auto;
+  display: grid;
+  gap: 7px;
+  padding-left: 10px;
+}
+
+.hermes-save-timeline::before {
+  content: "";
+  position: absolute;
+  top: 8px;
+  bottom: 8px;
+  left: 18px;
+  width: 2px;
+  background: #cbd5e1;
+}
+
+.hermes-save-item {
+  position: relative;
+  width: 100%;
+  min-height: 50px;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 9px;
+  padding: 8px 8px 8px 0;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--hermes-ink);
+  text-align: left;
+  cursor: pointer;
+}
+
+.hermes-save-item:hover,
+.hermes-save-item.selected {
+  border-color: #9cc9c3;
+  background: #ecfdf5;
+}
+
+.hermes-save-item.unsaved {
+  cursor: default;
+}
+
+.hermes-save-dot {
+  position: relative;
+  z-index: 1;
+  width: 18px;
+  height: 18px;
+  border: 3px solid #fff;
+  border-radius: 50%;
+  background: #94a3b8;
+  box-shadow: 0 0 0 1px #cbd5e1;
+}
+
+.hermes-save-item.current .hermes-save-dot {
+  background: var(--hermes-green);
+}
+
+.hermes-save-item.unsaved .hermes-save-dot {
+  background: var(--hermes-blue);
+}
+
+.hermes-save-copy {
+  min-width: 0;
+  display: block;
+}
+
+.hermes-save-copy b,
+.hermes-save-copy span {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hermes-save-copy b {
+  font-size: 12px;
+}
+
+.hermes-save-copy span {
+  margin-top: 3px;
+  color: var(--hermes-muted);
+  font-size: 11px;
+}
+
+.hermes-save-chip {
+  justify-self: end;
+  padding: 4px 6px;
+  border-radius: 999px;
+  background: #e6f4f1;
+  color: var(--hermes-green);
+  font-size: 11px;
+  font-weight: 900;
+}
+
+.hermes-log {
+  min-height: 0;
+  padding: 14px;
+  overflow-y: auto;
+  background: #f8fafc;
+}
+
+.hermes-message {
+  max-width: 92%;
+  margin: 0 0 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--hermes-line);
+  border-radius: 8px;
+  background: #fff;
+  color: var(--hermes-ink);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  line-height: 1.5;
+  font-size: 13px;
+}
+
+.hermes-message.user {
+  margin-left: auto;
+  border-color: #b7d5d2;
+  background: #ecfdf5;
+}
+
+.hermes-message.system {
+  max-width: 100%;
+  color: var(--hermes-muted);
+  background: transparent;
+  border-style: dashed;
+}
+
+.hermes-message.error {
+  border-color: #fecdd3;
+  color: var(--hermes-red);
+  background: #fff1f2;
+}
+
+.hermes-composer {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+  gap: 10px;
+  padding: 12px;
+  border-top: 1px solid var(--hermes-line);
+  background: #fff;
+}
+
+.hermes-input {
+  width: 100%;
+  height: 84px;
+  min-height: 84px;
+  max-height: 84px;
+  resize: none;
+  border: 1px solid var(--hermes-line);
+  border-radius: 8px;
+  padding: 10px 11px;
+  color: var(--hermes-ink);
+  font: 14px/1.45 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+.hermes-send {
+  width: 44px;
+  height: 44px;
+  background: var(--hermes-green);
+  border-color: var(--hermes-green);
+  color: #fff;
+}
+
+.hermes-send:hover {
+  background: #115e59;
+  border-color: #115e59;
+}
+
+.hermes-send:disabled {
+  opacity: 0.54;
+  cursor: progress;
+}
+
+.hermes-lab-shell {
+  margin: 0;
+  min-height: 100vh;
+  background: #f4f6f8;
+  color: var(--hermes-ink);
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+.hermes-lab-header {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--hermes-line);
+  background: rgba(255, 255, 255, 0.96);
+  backdrop-filter: blur(10px);
+}
+
+.hermes-lab-title {
+  min-width: 0;
+  flex: 1;
+  margin: 0;
+  font-size: 18px;
+  line-height: 1.2;
+}
+
+.hermes-lab-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.hermes-lab-actions button,
+.hermes-lab-actions a {
+  min-height: 36px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 8px 12px;
+  border: 1px solid var(--hermes-line);
+  border-radius: 8px;
+  background: #fff;
+  color: var(--hermes-ink);
+  text-decoration: none;
+  font-size: 13px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.hermes-lab-actions button.primary {
+  background: var(--hermes-green);
+  border-color: var(--hermes-green);
+  color: #fff;
+}
+
+.hermes-lab-actions button:disabled {
+  opacity: 0.6;
+  cursor: progress;
+}
+
+.hermes-lab-frame {
+  width: 100%;
+  height: calc(100vh - 62px);
+  border: 0;
+  display: block;
+  background: #fff;
+}
+
+@media (max-width: 680px) {
+  .hermes-fab {
+    right: 16px;
+    bottom: 16px;
+  }
+
+  .hermes-panel {
+    right: 16px;
+    bottom: 84px;
+    height: min(590px, calc(100vh - 108px));
+  }
+
+  .hermes-lab-header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .hermes-lab-actions {
+    width: 100%;
+    justify-content: flex-start;
+  }
+
+  .hermes-lab-frame {
+    height: calc(100vh - 112px);
+  }
+}
+
+@media (max-width: 980px) {
+  .hermes-lab-shell[data-hermes-sidebar="true"] {
+    padding-right: 0;
+  }
+
+  .hermes-sidebar-panel {
+    top: 0;
+    right: 0;
+    bottom: 0;
+    width: min(400px, 100vw);
+    height: 100vh;
+  }
+}
