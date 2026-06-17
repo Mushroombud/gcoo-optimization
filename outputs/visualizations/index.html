@@ -3,31 +3,205 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Sejong TAGO PM Visualization</title>
+  <title>GCOO Mobility Visualizations</title>
   <style>
-    body { margin: 0; font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #f6f7f9; color: #1b1f24; }
-    main { max-width: 840px; margin: 0 auto; padding: 48px 20px; }
-    h1 { margin: 0 0 12px; font-size: 28px; }
-    p { margin: 0 0 24px; color: #4b5563; line-height: 1.6; }
-    nav { display: grid; gap: 12px; }
-    a { display: block; padding: 16px 18px; border: 1px solid #d8dee8; border-radius: 8px; background: #fff; color: #0f4c81; text-decoration: none; font-weight: 650; }
-    a span { display: block; margin-top: 4px; color: #6b7280; font-size: 14px; font-weight: 400; }
+    :root {
+      color-scheme: light;
+      --ink: #172033;
+      --muted: #5d687a;
+      --line: #d9e0ea;
+      --panel: #ffffff;
+      --sejong: #6d5f15;
+      --model: #0f766e;
+      --lab: #8a2c0d;
+      --lab-deep: #13213a;
+      --lab-hot: #f97316;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: #f4f6f8;
+      color: var(--ink);
+    }
+    main {
+      max-width: 1080px;
+      margin: 0 auto;
+      padding: 48px 20px;
+    }
+    h1 {
+      margin: 0 0 10px;
+      font-size: 30px;
+      line-height: 1.2;
+    }
+    .lead {
+      max-width: 720px;
+      margin: 0 0 30px;
+      color: var(--muted);
+      line-height: 1.65;
+    }
+    section {
+      margin-top: 26px;
+    }
+    h2 {
+      margin: 0 0 12px;
+      font-size: 18px;
+      line-height: 1.35;
+    }
+    nav {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 12px;
+    }
+    a {
+      display: block;
+      min-height: 104px;
+      padding: 16px 18px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--panel);
+      color: var(--model);
+      text-decoration: none;
+      font-weight: 700;
+      box-shadow: 0 8px 22px rgba(23, 32, 51, 0.05);
+    }
+    a:hover {
+      border-color: #9fb3c8;
+      transform: translateY(-1px);
+    }
+    a:focus-visible {
+      outline: 3px solid rgba(20, 184, 166, 0.5);
+      outline-offset: 3px;
+    }
+    a span {
+      display: block;
+      margin-top: 6px;
+      color: var(--muted);
+      font-size: 14px;
+      line-height: 1.5;
+      font-weight: 400;
+    }
+    .sejong a { color: var(--sejong); }
+    .model a { color: var(--model); }
+    .lab a { color: var(--lab); }
+    .lab nav {
+      grid-template-columns: minmax(0, 1fr);
+      max-width: 560px;
+    }
+    .lab .lab-cta {
+      position: relative;
+      min-height: 132px;
+      padding: 22px 24px;
+      border: 0;
+      overflow: hidden;
+      isolation: isolate;
+      background:
+        radial-gradient(circle at 88% 18%, rgba(249, 115, 22, 0.95), transparent 24%),
+        linear-gradient(135deg, var(--lab-deep) 0%, #0f766e 55%, var(--lab-hot) 100%);
+      color: #ffffff;
+      box-shadow: 0 18px 36px rgba(15, 23, 42, 0.22), 0 0 0 1px rgba(255, 255, 255, 0.2) inset;
+    }
+    .lab .lab-cta::after {
+      content: "";
+      position: absolute;
+      right: 20px;
+      bottom: 18px;
+      z-index: 0;
+      color: rgba(255, 255, 255, 0.14);
+      font-size: 42px;
+      line-height: 1;
+      font-weight: 900;
+      letter-spacing: 0;
+      pointer-events: none;
+    }
+    .lab .lab-cta:hover {
+      border-color: transparent;
+      transform: translateY(-2px);
+      box-shadow: 0 22px 46px rgba(15, 23, 42, 0.28), 0 0 0 2px rgba(255, 255, 255, 0.28) inset;
+    }
+    .lab .lab-cta:focus-visible {
+      outline: 4px solid rgba(249, 115, 22, 0.45);
+      outline-offset: 4px;
+    }
+    .lab .lab-cta span,
+    .lab .lab-cta {
+      z-index: 1;
+    }
+    .lab .lab-cta span {
+      max-width: 390px;
+      color: rgba(255, 255, 255, 0.9);
+    }
+    .feature {
+      display: grid;
+      grid-template-columns: 1.1fr 0.9fr;
+      gap: 14px;
+      align-items: stretch;
+    }
+    .feature a {
+      min-height: 160px;
+      color: var(--model);
+    }
+    .formula {
+      margin: 0;
+      min-height: 160px;
+      padding: 16px 18px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #0f172a;
+      color: #e2e8f0;
+      overflow-x: auto;
+      line-height: 1.65;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 13px;
+      box-shadow: 0 8px 22px rgba(23, 32, 51, 0.05);
+    }
+    @media (max-width: 680px) {
+      main { padding: 34px 16px; }
+      nav, .feature { grid-template-columns: 1fr; }
+      a { min-height: auto; }
+      .lab .lab-cta::after { font-size: 34px; }
+    }
   </style>
 </head>
 <body>
   <main>
-    <h1>Sejong TAGO PM Visualization</h1>
-    <p>수집 cron이 갱신하는 최신 세종 PM 스냅샷 기반 정적 리포트입니다.</p>
-    <nav>
-      <a href="./optimization_model.html">Optimization Model 보기<span>Sejong 500m grid 기반 04:00 최적 배치 모델, 제약조건, 결과 시각화</span></a>
-      <a href="./optimization_model_map.html">Optimization 지도 보기<span>Zone별 최적 배치량 x*, 기대 ride, zone별 profit 지도</span></a>
-      <a href="./sejong_map.html">지도 보기<span>최신 PM 위치, 열지도, 500m 격자 집계</span></a>
-      <a href="./sejong_charts_dashboard.html">차트 대시보드 보기<span>공급자별 공급량, 시간 추세, 배터리 분포</span></a>
-      <a href="./optimization_model_data.json">Optimization JSON<span>최종 배치 결과, 모델 파라미터, 산출물 경로</span></a>
-      <a href="./model_sheet.html">Model Sheet 보기<span>Markdown 원문을 문서 화면으로 렌더링</span></a>
-      <a href="./sejong_visualization_manifest.json">Manifest JSON<span>생성 시각과 입력 데이터 행 수</span></a>
-    </nav>
+    <h1>GCOO Mobility Visualizations</h1>
+    <p class="lead">수집된 PM 데이터를 지도, 차트, 최적화 모델 관점에서 함께 볼 수 있는 시각화 허브입니다.</p>
+
+    <section class="model">
+      <h2>최적화 모델 시각화</h2>
+      <div class="feature">
+        <a href="./optimization_model.html">Optimization Model 보기<span>Sejong TAGO 스냅샷을 500m grid의 공급량, 추정 수요, competition pressure, rebalancing 부담으로 변환해 모델과 최종 배치 결과를 보여줍니다.</span></a>
+        <pre class="formula">Qᵢₛ(xᵢ) = min {
+  Aᵢₛ · [1 - exp(-βxᵢ / (1 + θCᵢₛ))],
+  Uxᵢ
+}
+
+maximize Eₛ[Σᵢ(pᵢ-v)Qᵢₛ(xᵢ) - Σᵢcᵢxᵢ - Σᵢrᵢ(xᵢ)]</pre>
+      </div>
+      <nav style="margin-top:12px;">
+        <a href="./optimization_model_map.html">모델 지도 보기<span>Zone별 최적 배치량 x*, 기대 ride, zone별 profit을 지도에서 확인</span></a>
+        <a href="./optimization_model_data.json">모델 데이터 JSON<span>최종 배치 결과, 파라미터, 생성된 산출물 경로</span></a>
+        <a href="./model_sheet.html">Model Sheet 보기<span>Markdown 원문을 표, 코드블록, 수식 설명이 읽히는 문서 화면으로 렌더링</span></a>
+      </nav>
+    </section>
+
+    <section class="lab">
+      <h2>에이전트 실험실</h2>
+      <nav>
+        <a class="lab-cta" href="./hermes_lab.html" aria-label="에이전트 실험실 열기">실험실 열기<span>자연어로 모델, 변수, 시각화를 바꾸고 상태 저장과 되돌리기를 실행</span></a>
+      </nav>
+    </section>
+
+    <section class="sejong">
+      <h2>세종시 TAGO PM 시각화</h2>
+      <nav>
+        <a href="./sejong_map.html">세종 지도 보기<span>최신 PM 위치, 공급사별 기기, 지도 기반 히트맵</span></a>
+        <a href="./sejong_charts_dashboard.html">세종 차트 대시보드 보기<span>공급사별 기기 수, 배터리, 시간대별 스냅샷</span></a>
+        <a href="./sejong_visualization_manifest.json">세종 Manifest JSON<span>생성 산출물과 TAGO 수집 행 수 등</span></a>
+      </nav>
+    </section>
   </main>
-  <script defer src="./hermes_widget.js?v=20260617-working-md"></script>
+  <script defer src="./hermes_widget.js"></script>
 </body>
 </html>
