@@ -8,13 +8,13 @@ import os
 import re
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import TextIO
-from typing import Any
+from typing import Any, TextIO
 
 import numpy as np
 import pandas as pd
 
 import data_input
+import temporal_thresholds as thresholds
 import visualize_optimization_model
 import visualize_sejong_tago
 from common import append_jsonl, ensure_dir, now_kst_iso, now_kst_label, write_json
@@ -174,8 +174,10 @@ def build_device_intervals(df: pd.DataFrame) -> pd.DataFrame:
     intervals["speed_kmph"] = intervals["distance_m"] / 1000.0 / (intervals["interval_minutes"] / 60.0)
     intervals.loc[~np.isfinite(intervals["speed_kmph"]), "speed_kmph"] = np.nan
     intervals["battery_delta"] = intervals["battery_level"] - intervals["prev_battery_level"]
-    intervals["moved_50m"] = intervals["distance_m"] >= 50
-    intervals["moved_200m"] = intervals["distance_m"] >= 200
+    intervals["moved_50m_threshold_m"] = thresholds.MOVEMENT_50M_THRESHOLD_M
+    intervals["moved_200m_threshold_m"] = thresholds.MOVEMENT_200M_THRESHOLD_M
+    intervals["moved_50m"] = intervals["distance_m"] >= intervals["moved_50m_threshold_m"]
+    intervals["moved_200m"] = intervals["distance_m"] >= intervals["moved_200m_threshold_m"]
     intervals["same_zone"] = intervals["zone_id"] == intervals["prev_zone_id"]
     output_columns = [
         "timestamp",
@@ -191,6 +193,8 @@ def build_device_intervals(df: pd.DataFrame) -> pd.DataFrame:
         "interval_minutes",
         "distance_m",
         "speed_kmph",
+        "moved_50m_threshold_m",
+        "moved_200m_threshold_m",
         "prev_battery_level",
         "battery_level",
         "battery_delta",
@@ -218,6 +222,8 @@ def build_activity_by_zone(intervals: pd.DataFrame) -> pd.DataFrame:
             avg_distance_m=("distance_m", "mean"),
             median_distance_m=("distance_m", "median"),
             avg_speed_kmph=("speed_kmph", "mean"),
+            avg_moved_50m_threshold_m=("moved_50m_threshold_m", "mean"),
+            avg_moved_200m_threshold_m=("moved_200m_threshold_m", "mean"),
             avg_battery_delta=("battery_delta", "mean"),
         )
         .reset_index()
@@ -279,6 +285,11 @@ def write_processed_outputs(
         "device_interval_count": int(len(intervals)),
         "moved_50m_interval_count": int(intervals["moved_50m"].sum()) if not intervals.empty else 0,
         "moved_200m_interval_count": int(intervals["moved_200m"].sum()) if not intervals.empty else 0,
+        "movement_thresholds": {
+            "moved_50m_threshold_m": thresholds.MOVEMENT_50M_THRESHOLD_M,
+            "moved_200m_threshold_m": thresholds.MOVEMENT_200M_THRESHOLD_M,
+            "scaling": "none; movement proxy thresholds intentionally preserve the original fixed-distance behavior",
+        },
         "zone_size_m": int(zone_size_m),
         "grid": grid_meta,
         "outputs": {

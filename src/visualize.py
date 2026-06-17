@@ -422,7 +422,7 @@ def operator_move_exclusion_section(summary: dict[str, Any]) -> str:
   <p>
     공유 PM의 강제 속도 한계 25km/h를 기준으로, 실제 이용자 주행보다는 관리업체의 차량 적재 재배치,
     회수, 배터리 교환 과정으로 보이는 이동은 <code>excluded_from_demand=true</code>로 표시하고
-    수요 <code>D_i</code>, OD flow, 최적화 계산에서 제외합니다.
+    수요 <code>D_i</code>, Origin-Destination Pair flow, 최적화 계산에서 제외합니다.
   </p>
   <div class="operator-move-exclusion-grid">
     <div class="operator-move-exclusion-card">
@@ -430,7 +430,7 @@ def operator_move_exclusion_section(summary: dict[str, Any]) -> str:
       <ul>
         <li><code>speed_kmph &gt; 28</code>: PM 자체 주행으로 보기 어려운 고속 이동</li>
         <li><code>speed_kmph &gt; 25</code>이고 같은 기기에서 30분 내 고속 이동 2회 이상 반복</li>
-        <li><code>speed_kmph &gt; 25</code>이고 같은 시간/OD에 2대 이상 함께 이동</li>
+        <li><code>speed_kmph &gt; 25</code>이고 같은 시간/Origin-Destination Pair에 2대 이상 함께 이동</li>
         <li><code>speed_kmph &gt; 25</code>이고 배터리 변화량 절댓값이 20pp 이상</li>
       </ul>
     </div>

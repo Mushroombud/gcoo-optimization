@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import argparse
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import json
 import math
+import os
 import time
 import xml.etree.ElementTree as ET
 from datetime import datetime, timedelta
@@ -734,10 +736,39 @@ def fetch_tago_pm_list_page(
     }
 
 
+def fetch_tago_pm_provider_rows(
+    config: dict[str, Any],
+    provider: dict[str, Any],
+    snapshot_label: str,
+    rows_per_page: int,
+    max_pages: int,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    provider_name = str(provider["provider_name"])
+    city_code = str(provider["city_code"])
+    provider_rows: list[dict[str, Any]] = []
+    list_events: list[dict[str, Any]] = []
+    for page_no in range(1, max_pages + 1):
+        rows, total_count, event = fetch_tago_pm_list_page(
+            config,
+            provider_name,
+            city_code,
+            page_no,
+            snapshot_label,
+        )
+        list_events.append(event)
+        provider_rows.extend(rows)
+        if not rows or len(rows) < rows_per_page:
+            break
+        if total_count is not None and len(provider_rows) >= total_count:
+            break
+    return provider_rows, list_events
+
+
 def fetch_tago_pm_snapshot(config: dict[str, Any], snapshot_label: str) -> pd.DataFrame:
     api_cfg = config["data_input"]["apis"]["tago_pm"]
     rows_per_page = int(api_cfg.get("rows_per_page", 1000))
     max_pages = int(api_cfg.get("max_list_pages", 50))
+    list_fetch_workers = max(1, int(api_cfg.get("list_fetch_workers", 1)))
     notes: list[str] = []
     providers, all_providers, provider_events = fetch_tago_providers(config, snapshot_label)
     target_city_name = api_cfg.get("target_city_name") or api_cfg.get("city_name")
@@ -764,25 +795,36 @@ def fetch_tago_pm_snapshot(config: dict[str, Any], snapshot_label: str) -> pd.Da
 
     all_rows: list[dict[str, Any]] = []
     list_events: list[dict[str, Any]] = []
-    for provider in providers.to_dict("records"):
-        provider_name = str(provider["provider_name"])
-        city_code = str(provider["city_code"])
-        provider_rows: list[dict[str, Any]] = []
-        for page_no in range(1, max_pages + 1):
-            rows, total_count, event = fetch_tago_pm_list_page(
+    provider_records = providers.to_dict("records")
+    if list_fetch_workers == 1 or len(provider_records) <= 1:
+        for provider in provider_records:
+            provider_rows, provider_events = fetch_tago_pm_provider_rows(
                 config,
-                provider_name,
-                city_code,
-                page_no,
+                provider,
                 snapshot_label,
+                rows_per_page,
+                max_pages,
             )
-            list_events.append(event)
-            provider_rows.extend(rows)
-            if not rows or len(rows) < rows_per_page:
-                break
-            if total_count is not None and len(provider_rows) >= total_count:
-                break
-        all_rows.extend(provider_rows)
+            all_rows.extend(provider_rows)
+            list_events.extend(provider_events)
+    else:
+        max_workers = min(list_fetch_workers, len(provider_records))
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = [
+                executor.submit(
+                    fetch_tago_pm_provider_rows,
+                    config,
+                    provider,
+                    snapshot_label,
+                    rows_per_page,
+                    max_pages,
+                )
+                for provider in provider_records
+            ]
+            for future in as_completed(futures):
+                provider_rows, provider_events = future.result()
+                all_rows.extend(provider_rows)
+                list_events.extend(provider_events)
 
     snapshot_df, normalize_notes = normalize_pm_records(all_rows, now_kst_iso())
     notes.extend(normalize_notes)
@@ -790,7 +832,9 @@ def fetch_tago_pm_snapshot(config: dict[str, Any], snapshot_label: str) -> pd.Da
     if not snapshot_df.empty:
         out_path = Path(config["data_input"]["paths"]["tago_pm_snapshot_pattern"].format(label=snapshot_label))
         ensure_dir(out_path.parent)
-        snapshot_df.to_csv(out_path, index=False)
+        tmp_path = out_path.with_name(f".{out_path.name}.{os.getpid()}.tmp")
+        snapshot_df.to_csv(tmp_path, index=False)
+        tmp_path.replace(out_path)
         normalized_path = str(out_path)
 
     record_manifest(

@@ -14,15 +14,22 @@ from pyecharts.charts import Bar, Line, Page, Scatter
 
 from common import ensure_dir, write_json
 from hermes_embed import inject_hermes_widget
+import temporal_thresholds as thresholds
 
 
 OPERATOR_COLORS = {
     "ALPACA": "#2563eb",
     "GBIKE": "#0f766e",
 }
-RIDE_INTERVAL_MINUTES = 5.0
-RIDE_INTERVAL_TOLERANCE_MINUTES = 1.0
-RIDE_DISTANCE_THRESHOLD_M = 100.0
+RIDE_REFERENCE_INTERVAL_MINUTES = thresholds.RIDE_REFERENCE_INTERVAL_MINUTES
+RIDE_INTERVAL_TOLERANCE_MINUTES = thresholds.RIDE_INTERVAL_TOLERANCE_MINUTES
+RIDE_DISTANCE_THRESHOLD_REFERENCE_M = thresholds.RIDE_DISTANCE_THRESHOLD_REFERENCE_M
+RIDE_ALLOWED_INTERVAL_MINUTES = thresholds.RIDE_ALLOWED_INTERVAL_MINUTES
+RIDE_RULE_TEXT = thresholds.scaled_rule_text(
+    RIDE_DISTANCE_THRESHOLD_REFERENCE_M,
+    RIDE_REFERENCE_INTERVAL_MINUTES,
+    RIDE_ALLOWED_INTERVAL_MINUTES,
+)
 PM_SPEED_LIMIT_KMPH = 25.0
 OPERATOR_MOVE_SPEED_THRESHOLD_KMPH = 28.0
 OPERATOR_MOVE_REPEAT_WINDOW_MINUTES = 30.0
@@ -35,7 +42,7 @@ MAX_RIDE_SEGMENTS = 1000
 OPERATOR_MOVE_RULE_TEXT = (
     f"Excluded from demand when speed > {OPERATOR_MOVE_SPEED_THRESHOLD_KMPH:.0f}km/h, "
     f"or speed > {PM_SPEED_LIMIT_KMPH:.0f}km/h with repeated fast moves within "
-    f"{OPERATOR_MOVE_REPEAT_WINDOW_MINUTES:.0f}min, same OD/time cluster of "
+    f"{OPERATOR_MOVE_REPEAT_WINDOW_MINUTES:.0f}min, same Origin-Destination Pair/time cluster of "
     f"{OPERATOR_MOVE_CLUSTER_MIN_DEVICES}+ devices, or battery delta >= "
     f"{OPERATOR_MOVE_BATTERY_DELTA_ABS:.0f}pp."
 )
@@ -167,7 +174,7 @@ def make_activity_trend(intervals: pd.DataFrame) -> Line:
     return chart.set_global_opts(
         title_opts=opts.TitleOpts(
             title="Snapshot-to-snapshot activity proxy",
-            subtitle="Movement is inferred from device location deltas",
+            subtitle="Movement is inferred from device location deltas using original fixed-distance thresholds",
         ),
         tooltip_opts=opts.TooltipOpts(trigger="axis"),
         datazoom_opts=[opts.DataZoomOpts(), opts.DataZoomOpts(type_="inside")],
@@ -416,11 +423,21 @@ def ride_segment_candidates(intervals: pd.DataFrame) -> pd.DataFrame:
             "distance_m",
         ]
     )
-    min_minutes = RIDE_INTERVAL_MINUTES - RIDE_INTERVAL_TOLERANCE_MINUTES
-    max_minutes = RIDE_INTERVAL_MINUTES + RIDE_INTERVAL_TOLERANCE_MINUTES
+    interval_mask = thresholds.within_any_interval(
+        rows["interval_minutes"],
+        RIDE_ALLOWED_INTERVAL_MINUTES,
+        RIDE_INTERVAL_TOLERANCE_MINUTES,
+    )
+    distance_mask, distance_threshold = thresholds.distance_meets_scaled_threshold(
+        rows["distance_m"],
+        rows["interval_minutes"],
+        RIDE_DISTANCE_THRESHOLD_REFERENCE_M,
+        RIDE_REFERENCE_INTERVAL_MINUTES,
+    )
+    rows["ride_distance_threshold_m"] = distance_threshold
     segments = rows[
-        rows["interval_minutes"].between(min_minutes, max_minutes)
-        & (rows["distance_m"] >= RIDE_DISTANCE_THRESHOLD_M)
+        interval_mask
+        & distance_mask
     ].copy()
     if segments.empty:
         return segments
@@ -602,7 +619,7 @@ def add_ride_summary_panel(m: folium.Map, summary: dict[str, Any], rendered_segm
         line-height: 1.45;
     ">
       <div style="font-size: 14px; font-weight: 700; margin-bottom: 6px;">Sejong inferred ride movement</div>
-      <div style="font-size: 12px;">Rule: {RIDE_INTERVAL_MINUTES:.0f}min +/- {RIDE_INTERVAL_TOLERANCE_MINUTES:.0f}min, distance >= {RIDE_DISTANCE_THRESHOLD_M:.0f}m</div>
+      <div style="font-size: 12px;">Rule: {RIDE_RULE_TEXT} (+/- {RIDE_INTERVAL_TOLERANCE_MINUTES:.0f}min)</div>
       <div style="font-size: 12px; margin-top: 4px; color:#475569;">Operator filter: {html.escape(OPERATOR_MOVE_RULE_TEXT)}</div>
       <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 4px 10px; margin-top: 8px; font-size: 12px;">
         <span>raw segments</span><b>{summary['ride_segments']:,}</b>
@@ -610,8 +627,8 @@ def add_ride_summary_panel(m: folium.Map, summary: dict[str, Any], rendered_segm
         <span>excluded ops</span><b>{summary['excluded_operator_move_segments']:,}</b>
         <span>rendered samples</span><b>{rendered_segments:,}</b>
         <span>devices</span><b>{summary['ride_devices']:,}</b>
-        <span>OD pairs</span><b>{summary['od_pairs']:,}</b>
-        <span>rendered OD</span><b>{rendered_od:,}</b>
+        <span>Origin-Destination Pairs</span><b>{summary['od_pairs']:,}</b>
+        <span>rendered Origin-Destination</span><b>{rendered_od:,}</b>
         <span>avg distance</span><b>{summary['avg_distance_m']:.0f}m</b>
         <span>median</span><b>{summary['median_distance_m']:.0f}m</b>
         <span>avg speed</span><b>{summary['avg_speed_kmph']:.1f}km/h</b>
@@ -640,7 +657,7 @@ def add_ride_segments(
 
     if not rendered_od.empty:
         od_layer = folium.FeatureGroup(
-            name=f"Top OD flows by 500m grid ({len(rendered_od):,}/{len(od_flows):,})",
+            name=f"Top Origin-Destination Pair flows by 500m grid ({len(rendered_od):,}/{len(od_flows):,})",
             show=True,
         ).add_to(m)
         for row in rendered_od.itertuples():
@@ -715,6 +732,7 @@ def add_ride_segments(
             operator_name = str(getattr(row, "operator_name", "UNKNOWN"))
             color = operator_color(operator_name)
             distance_m = float(getattr(row, "distance_m", 0.0))
+            threshold_m = float(getattr(row, "ride_distance_threshold_m", 0.0))
             speed_kmph = pd.to_numeric(getattr(row, "speed_kmph", None), errors="coerce")
             speed_text = "n/a" if pd.isna(speed_kmph) else f"{float(speed_kmph):.1f}km/h"
             popup = (
@@ -723,9 +741,10 @@ def add_ride_segments(
                 f"from={html.escape(str(getattr(row, 'prev_timestamp', '')))}<br>"
                 f"to={html.escape(str(getattr(row, 'timestamp', '')))}<br>"
                 f"distance={distance_m:.0f}m<br>"
+                f"threshold={threshold_m:.0f}m<br>"
                 f"interval={float(getattr(row, 'interval_minutes', 0.0)):.1f}min<br>"
                 f"speed={speed_text}<br>"
-                f"OD={html.escape(str(getattr(row, 'prev_zone_id', '')))}"
+                f"Origin-Destination Pair={html.escape(str(getattr(row, 'prev_zone_id', '')))}"
                 f" -> {html.escape(str(getattr(row, 'zone_id', '')))}"
             )
             folium.PolyLine(
@@ -807,6 +826,14 @@ def render(
         "charts_dashboard": str(charts_path),
         "map": str(map_path),
         "ride_outputs": ride_output_paths,
+        "ride_thresholds": {
+            "reference_interval_minutes": RIDE_REFERENCE_INTERVAL_MINUTES,
+            "allowed_interval_minutes": list(RIDE_ALLOWED_INTERVAL_MINUTES),
+            "interval_tolerance_minutes": RIDE_INTERVAL_TOLERANCE_MINUTES,
+            "distance_threshold_reference_m": RIDE_DISTANCE_THRESHOLD_REFERENCE_M,
+            "rule_text": RIDE_RULE_TEXT,
+            "scaling": "distance_threshold_m = 100m * interval_minutes / 5",
+        },
         "render_limits": {
             "max_device_markers": int(max_markers),
             "max_ride_segments": int(max_ride_segments),

@@ -77,6 +77,7 @@ data_input:
       rows_per_page: 1000
       max_provider_pages: 20
       max_list_pages: 50
+      list_fetch_workers: 4
       provider_name: ""
 
 model:
@@ -90,7 +91,7 @@ model:
     seoul_kickboard_parking_zones_csv: data/raw/seoul_kickboard_parking_zones.csv
   surrogate_pm:
     enabled_when_tago_missing: true
-    fallback_gcoo_total_supply: 500
+    fallback_gcoo_total_supply: 2800
     fallback_competitor_total_supply: 5000
     demand_weight: 1.0
     tow_weight: 2.0

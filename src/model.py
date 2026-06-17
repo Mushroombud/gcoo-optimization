@@ -227,7 +227,7 @@ def build_surrogate_pm_scenario(
     if base["activity_weight"].sum() <= 0:
         base["activity_weight"] = 1.0
 
-    gcoo_total = float(cfg.get("fallback_gcoo_total_supply", 500))
+    gcoo_total = float(cfg.get("fallback_gcoo_total_supply", 2800))
     base["gcoo_count_is"] = base["activity_weight"] / base["activity_weight"].sum() * gcoo_total
 
     fallback_competitor_total = float(cfg.get("fallback_competitor_total_supply", 5000))

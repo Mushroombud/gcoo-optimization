@@ -17,9 +17,14 @@
 | --- | --- |
 | `Data_Model_Sheet.md` | 데이터 구조와 optimization model을 설명하는 Model Sheet |
 | `outputs/visualizations/optimization_model.html` | 모델 식, 변수, 제약조건, 결과, simulation을 보여주는 HTML dashboard |
+| `outputs/visualizations/hermes_lab.html` | `optimization_model.html`과 동일한 dashboard mirror. Hermes Lab 진입점에서도 기본 내용이 달라지지 않도록 같은 HTML을 생성 |
 | `outputs/visualizations/optimization_model_map.html` | zone별 최적 배치량 `x*` 지도 |
+| `outputs/visualizations/temporal_inventory_map.html` | Origin-Destination Pair 기반 하루 재고 simulation을 Sejong 500m grid 지도 위에 animation으로 표시 |
 | `outputs/visualizations/optimization_model_data.json` | 최적화 결과와 산출물 경로 JSON |
-| `outputs/visualizations/sejong_map.html` | 최신 PM 위치와 ride/OD 기반 지도 |
+| `outputs/visualizations/temporal_inventory_shortages.csv` | Origin-Destination Pair 기반 하루 재고 simulation에서 PM 부족이 발생한 시간대/zone 기록 |
+| `outputs/visualizations/temporal_inventory_hourly_summary.csv` | Origin-Destination Pair 기반 하루 재고 simulation의 시간대별 수요/처리/미처리 summary |
+| `outputs/visualizations/temporal_inventory_od_movements.csv` | 시간대별 simulated Origin-Destination Pair demand, served movement, unmet movement, random shock 기록 |
+| `outputs/visualizations/sejong_map.html` | 최신 PM 위치와 ride/Origin-Destination Pair 기반 지도 |
 | `outputs/visualizations/sejong_charts_dashboard.html` | 수집량, 공급자별 현황, battery/activity chart |
 
 ---
@@ -39,9 +44,10 @@ TAGO API snapshot
 -> latest supply by operator and zone
 -> device interval movement
 -> inferred ride segment
--> OD flow
+-> Origin-Destination Pair flow
 -> optimization model input
 -> non-linear deployment dashboard
+-> Origin-Destination Pair based temporal inventory simulation
 ```
 
 ---
@@ -153,7 +159,7 @@ A_i
 
 | Constraint | 식 | 의미 |
 | --- | --- | --- |
-| Fleet | `Σ_i x_i = F` | 이번 run에서는 500대를 반드시 배치 |
+| Fleet | `Σ_i x_i = F` | 이번 run에서는 2,800대를 반드시 배치 |
 | Capacity | `0 <= x_i <= K_i` | 각 500m zone의 물리적/운영적 수용량 |
 | Demand capture | `Q_i <= A_i(1-exp(-βx_i/(1+θC_i)))` | 배치량 증가의 체감효과와 경쟁 압력 |
 | Device throughput | `Q_i <= Ux_i` | PM 1대가 하루 처리 가능한 최대 ride 수 |
@@ -165,7 +171,11 @@ A_i
 
 ## 6. Simulation
 
-Optimization은 특정 parameter와 demand assumption 아래에서 `x*`를 찾습니다. 실제 운영일에는 수요와 비용이 흔들릴 수 있으므로, dashboard는 `x*`를 고정한 뒤 demand/cost shock scenario를 만들어 Objective value 분포를 보여줍니다.
+Optimization은 특정 parameter와 demand assumption 아래에서 `x*`를 찾습니다. 현재 dashboard에는 서로 다른 목적의 simulation이 두 개 들어갑니다.
+
+### 6.1 Objective Robustness Simulation
+
+실제 운영일에는 수요와 비용이 흔들릴 수 있으므로, dashboard는 `x*`를 고정한 뒤 demand/cost shock scenario를 만들어 Objective value 분포를 보여줍니다.
 
 ```text
 1. 최적 배치 x*를 고정한다.
@@ -174,7 +184,41 @@ Optimization은 특정 parameter와 demand assumption 아래에서 `x*`를 찾�
 4. P10, P50, P90, downside risk를 해석한다.
 ```
 
-Simulation은 solver를 대체하는 algorithm이 아니라, 선택된 배치안의 robustness를 검증하는 단계입니다.
+### 6.2 Origin-Destination Pair based Temporal Inventory Simulation
+
+정적 최적화는 04:00 배치 `x_i`와 하루 총 기대 ride `Q_i(x_i)`를 직접 연결합니다. 하지만 실제 운영에서는 PM이 ride를 통해 zone 사이를 이동합니다. 따라서 “A에 처음 몰려 있어도 A→B 이동이 많으면 B의 공급이 늘어난다”는 누적 효과를 사후 검증하기 위해 시간대별 재고 simulation을 추가했습니다.
+
+이 simulation은 solver를 다시 푸는 단계가 아니라, 이미 구한 최적 배치 `P* = {x_i*}`가 하루 Origin-Destination Pair 흐름 속에서도 공급 부족을 만들지 않는지 확인하는 lightweight extension입니다.
+
+```text
+1. clean inferred ride를 04:00 기준 operating day, 1시간대, Origin-Destination Pair로 집계한다.
+2. log(1 + count) = hour effect + Origin-Destination Pair effect 회귀를 추정한다.
+3. 관측 평균 빈도와 회귀 예측값을 섞어 시간대별 Origin-Destination Pair base rate λ_hat을 만든다.
+4. 하루 Origin-Destination Pair rate 총량이 optimization section의 기대 ride `sum_i Q_i(x_i*)`와 맞도록 calibration factor를 곱한다.
+5. 시간 공통 shock와 origin별 shock를 섞어 correlated normal random value Z를 만든다.
+6. Excel NORM.INV와 같은 원리로 얻은 normal shock를 rate에 곱해 random Origin-Destination Pair demand를 생성한다.
+7. GCOO 초기 재고는 P*=x*, ALPACA 초기 재고는 latest snapshot 공급량으로 둔다.
+8. 04:00부터 다음 03:00까지 1시간씩 origin 재고를 차감하고 destination 재고를 증가시킨다.
+9. demand가 있었지만 origin 재고가 부족한 경우 shortage log에 시간대, zone, 수요, 처리량, 부족량을 기록한다.
+```
+
+따라서 `Simulated combined demand`는 특정 random day에서 실현된 수요이고, `Target Q(x*) rides`는 optimization model이 예측한 하루 기대 ride 총량입니다. 두 값은 Poisson/random shock 때문에 완전히 같지는 않지만, simulation의 기대 총량은 `sum_i Q_i(x_i*)`에 맞춰져 있습니다.
+
+재고 전이는 다음처럼 읽을 수 있습니다.
+
+```math
+S_{i,t+1}=S_{i,t}-\text{served departures}_{i,t}+\text{served arrivals}_{i,t}
+```
+
+수요가 재고보다 큰 경우:
+
+```math
+\text{unmet}_{i,t}=\max(0,\text{demand}_{i,t}-S_{i,t})
+```
+
+`optimization_model.html`의 맨 아래에는 `temporal_inventory_map.html`을 iframe으로 넣어, Sejong 지도 위에서 시간대별 Origin-Destination Pair 이동과 500m grid 재고를 animation으로 보여줍니다. 지도는 peak shortage hour를 첫 화면으로 열고, 붉은 500m grid는 PM 부족 origin, 초록 선과 화살표는 처리된 Origin-Destination Pair movement, 파란 점은 destination inflow를 뜻합니다. 전체 shortage 기록은 `temporal_inventory_shortages.csv`에 저장되고, 전체 simulated Origin-Destination Pair movement와 random shock audit trail은 `temporal_inventory_od_movements.csv`에 저장됩니다.
+
+두 simulation 모두 solver를 대체하는 algorithm이 아니라, 선택된 배치안의 robustness와 운영상 약점을 검증하는 단계입니다.
 
 ---
 
@@ -184,7 +228,7 @@ Simulation은 solver를 대체하는 algorithm이 아니라, 선택된 배치안
 
 | Parameter | 값 | 의미 |
 | --- | ---: | --- |
-| `F` | 500 | 이번 run에서 배치할 전체 GBIKE PM 수 |
+| `F` | 2,800 | 이번 run에서 배치할 전체 GBIKE PM 수 |
 | `λ` | 0.30 | 경쟁사 존재를 market validation으로 반영하는 강도 |
 | `β` | 0.08 | GBIKE 배치량이 demand capture로 전환되는 속도 |
 | `θ` | 1.00 | ALPACA 공급량이 GBIKE capture를 약화시키는 정도 |
@@ -270,8 +314,13 @@ data/processed/sejong_tago/collector_runs.jsonl
 ```text
 outputs/visualizations/index.html
 outputs/visualizations/optimization_model.html
+outputs/visualizations/hermes_lab.html
 outputs/visualizations/optimization_model_map.html
+outputs/visualizations/temporal_inventory_map.html
 outputs/visualizations/optimization_model_data.json
+outputs/visualizations/temporal_inventory_shortages.csv
+outputs/visualizations/temporal_inventory_hourly_summary.csv
+outputs/visualizations/temporal_inventory_od_movements.csv
 outputs/visualizations/sejong_map.html
 outputs/visualizations/sejong_charts_dashboard.html
 outputs/visualizations/sejong_visualization_manifest.json
@@ -287,6 +336,9 @@ outputs/visualizations/sejong_visualization_manifest.json
 - zone별 배치 지도
 - non-linear demand capture 해설
 - demand/cost shock simulation 해설
+- Sejong 500m grid 지도 기반 Origin-Destination Pair 하루 재고 simulation animation
+- 수요가 있었지만 PM이 부족했던 시간대/zone shortage 기록
+- 시간대별 simulated Origin-Destination Pair movement와 random shock audit log
 
 ---
 
@@ -297,11 +349,11 @@ outputs/visualizations/sejong_visualization_manifest.json
 | Layer | Stack | 역할 |
 | --- | --- | --- |
 | Data collection | `requests`, TAGO API | PM provider/device snapshot 수집 |
-| Data processing | `pandas`, `numpy` | snapshot 정규화, grid mapping, interval/OD 계산 |
+| Data processing | `pandas`, `numpy` | snapshot 정규화, grid mapping, interval/Origin-Destination Pair 계산 |
 | Config | `PyYAML`, `.env` | API key와 model parameter 관리 |
 | Optimization prototype | Python functions | non-linear demand/profit 계산과 배치 결과 생성 |
 | Charts | `pyecharts` | 시간 추세, operator 현황 chart |
-| Maps | `folium`, `branca`, Leaflet | PM 위치, OD flow, optimization result 지도 |
+| Maps | `folium`, `branca`, Leaflet | PM 위치, Origin-Destination Pair flow, optimization result 지도 |
 | Static serving | `python -m http.server` | `outputs/visualizations` 로컬 서빙 |
 | Public tunnel | `cloudflared` optional | 외부 공유용 tunnel |
 | Scheduling | `cron` | 5분 주기 수집/전처리/시각화 refresh |
@@ -322,7 +374,7 @@ src/collect_sejong_tago.py
         +-- raw snapshot write
         +-- 500m grid zone mapping
         +-- processed CSV generation
-        +-- inferred ride / OD flow generation
+        +-- inferred ride / Origin-Destination Pair flow generation
         |
         +--> src/visualize_sejong_tago.py
         |       +-- sejong_map.html
@@ -332,9 +384,13 @@ src/collect_sejong_tago.py
                 +-- build zone model
                 +-- compute non-linear demand capture
                 +-- compute deployment result x*
+                +-- simulate hourly Origin-Destination Pair inventory movement from P*
                 +-- optimization_model.html
                 +-- optimization_model_map.html
+                +-- temporal_inventory_map.html
                 +-- optimization_model_data.json
+                +-- temporal_inventory_shortages.csv
+                +-- temporal_inventory_od_movements.csv
 ```
 
 현재 `collect_sejong_tago.py`가 cron entry point입니다. 이 파일이 한 번 실행될 때마다 일반 Sejong visualization과 optimization visualization이 모두 갱신됩니다.
@@ -359,6 +415,9 @@ src/visualize_optimization_model.py
 | `demand_capture()` | `Q_i(x_i)` 비선형 수요함수 계산 |
 | `zone_profit()` | zone별 profit contribution 계산 |
 | `optimize_dashboard_solution()` | fleet `F`를 zone별 `x*`로 배치 |
+| `fit_temporal_od_rates()` | clean ride segment로 시간대별 Origin-Destination Pair log-frequency 회귀 추정 |
+| `build_temporal_inventory_simulation()` | `P*=x*`와 ALPACA latest supply에서 시작하는 시간대별 재고 simulation |
+| `temporal_simulation_panel()` | Origin-Destination Pair 이동 animation, 처리율, shortage table을 HTML 하단에 렌더링 |
 | `render_html()` | model sheet dashboard HTML 생성 |
 | `render_model_map()` | folium 기반 최적 배치 지도 생성 |
 
@@ -467,6 +526,21 @@ http://127.0.0.1:8080/sejong_map.html
 http://127.0.0.1:8080/sejong_charts_dashboard.html
 ```
 
+에이전트 채팅과 실험실 저장/되돌리기를 함께 쓰려면 에이전트 브리지를 실행합니다.
+
+```bash
+python scripts/hermes_bridge.py --init-lab
+```
+
+브리지는 같은 정적 페이지도 함께 제공합니다.
+
+```text
+http://127.0.0.1:8787/index.html
+http://127.0.0.1:8787/hermes_lab.html
+```
+
+채팅 기록은 Hermes의 기존 `~/.hermes/state.db` Session Storage에 `gcoo-web` source로 저장됩니다. 위젯의 `기록` 버튼에서 이전 대화를 복원할 수 있습니다.
+
 Cloudflare Tunnel을 사용하려면:
 
 ```bash
@@ -567,8 +641,10 @@ grep -Eo 'https://[^ ]+\.trycloudflare\.com' logs/sejong_tago_cloudflared.log | 
 
 - TAGO snapshot은 실제 대여 시작/종료 event log가 아니므로, ride demand는 device movement interval에서 추정합니다.
 - 현재 dashboard는 외부 commercial MINLP solver를 호출하지 않고, model을 설명하고 결과를 시각화하기 위한 Python routine을 사용합니다.
+- Origin-Destination Pair 기반 하루 재고 simulation은 `x*`를 고정한 사후 검증입니다. `x_i`, `S_{i,t}`, `Q_{i,t}`를 동시에 최적화하는 full time-expanded nonlinear optimization은 아직 풀지 않습니다.
 - `p_i`, `v`, `c_i`, `ρ`, `U`, `β`, `θ`, `λ`는 baseline assumption이며 실제 GCOO 내부 정산/운영 데이터가 있으면 보정해야 합니다.
 - GPS noise, 수거/재배치 이동, 실제 이용 이동이 snapshot interval 안에서 섞일 수 있으므로 inferred ride는 proxy입니다.
+- Origin-Destination Pair simulation의 random demand는 snapshot에서 추정한 빈도와 회귀 smoothing을 기반으로 한 synthetic day입니다. 실제 결제/대여 event log가 있으면 시간대별 rate와 shortage 측정이 더 정확해집니다.
 - 현재 모델은 500m grid zone 단위이며, 실제 sidewalk-level parking constraints는 반영하지 않습니다.
 
 ---
@@ -579,19 +655,21 @@ grep -Eo 'https://[^ ]+\.trycloudflare\.com' logs/sejong_tago_cloudflared.log | 
 
 1. Sejong TAGO PM snapshot data description
 2. 500m grid zone construction
-3. Device interval에서 inferred ride와 OD flow 추정
+3. Device interval에서 inferred ride와 Origin-Destination Pair flow 추정
 4. Linear Optimization baseline
 5. Non-linear demand capture 기반 main model
 6. ALPACA competition effect
 7. Fleet/capacity/throughput constraints
 8. Profit-maximizing objective
-9. Simulation으로 demand/cost shock 아래 robustness 평가
-10. 최종 배치 `x*`의 business interpretation
+9. Simulation으로 demand/cost shock 아래 objective robustness 평가
+10. Origin-Destination Pair 기반 시간대별 재고 simulation으로 `P*`가 실제 Origin-Destination Pair 흐름을 충분히 버티는지 검증
+11. 최종 배치 `x*`의 business interpretation
 
 프로젝트의 핵심 문장은 다음처럼 정리할 수 있습니다.
 
 ```text
 This project formulates Sejong GBIKE 04:00 deployment as a profit-maximizing
 non-linear optimization problem where demand capture saturates with deployment,
-weakens under ALPACA competition, and is evaluated under demand/cost uncertainty.
+weakens under ALPACA competition, and is evaluated under demand/cost uncertainty
+plus Origin-Destination Pair based temporal inventory movement.
 ```

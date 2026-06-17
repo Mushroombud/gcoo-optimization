@@ -207,12 +207,19 @@ write_visualization_index() {
       <a href="./sejong_map.html">지도 보기<span>최신 PM 위치, 열지도, 500m 격자 집계</span></a>
       <a href="./sejong_charts_dashboard.html">차트 대시보드 보기<span>공급자별 공급량, 시간 추세, 배터리 분포</span></a>
       <a href="./optimization_model_data.json">Optimization JSON<span>최종 배치 결과, 모델 파라미터, 산출물 경로</span></a>
+      <a href="./model_sheet.html">Model Sheet 보기<span>Markdown 원문을 문서 화면으로 렌더링</span></a>
       <a href="./sejong_visualization_manifest.json">Manifest JSON<span>생성 시각과 입력 데이터 행 수</span></a>
     </nav>
   </main>
 </body>
 </html>
 EOF
+}
+
+write_model_sheet_assets() {
+  if [[ -f "${REPO_ROOT}/Data_Model_Sheet.md" ]]; then
+    cp -p "${REPO_ROOT}/Data_Model_Sheet.md" "${VISUALIZATION_DIR}/Data_Model_Sheet.md"
+  fi
 }
 
 pid_is_running() {
@@ -242,10 +249,17 @@ start_static_server() {
     echo "Static HTTP server already running with pid $(cat "${STATIC_SERVER_PID_FILE}")."
   else
     echo "Starting static HTTP server on ${STATIC_BIND_HOST}:${STATIC_PORT}..."
-    nohup "${VENV_PYTHON}" -m http.server "${STATIC_PORT}" \
-      --bind "${STATIC_BIND_HOST}" \
-      --directory "${VISUALIZATION_DIR}" \
-      >> "${STATIC_SERVER_LOG_FILE}" 2>&1 &
+    if command -v setsid >/dev/null 2>&1; then
+      setsid "${VENV_PYTHON}" "${REPO_ROOT}/scripts/serve_visualizations.py" "${STATIC_PORT}" \
+        --bind "${STATIC_BIND_HOST}" \
+        --directory "${VISUALIZATION_DIR}" \
+        >> "${STATIC_SERVER_LOG_FILE}" 2>&1 < /dev/null &
+    else
+      nohup "${VENV_PYTHON}" "${REPO_ROOT}/scripts/serve_visualizations.py" "${STATIC_PORT}" \
+        --bind "${STATIC_BIND_HOST}" \
+        --directory "${VISUALIZATION_DIR}" \
+        >> "${STATIC_SERVER_LOG_FILE}" 2>&1 &
+    fi
     printf "%s\n" "$!" > "${STATIC_SERVER_PID_FILE}"
   fi
 }
@@ -278,6 +292,7 @@ start_cloudflare_tunnel() {
 
 setup_static_serving() {
   write_visualization_index
+  write_model_sheet_assets
   start_static_server
   start_cloudflare_tunnel
 }
@@ -286,6 +301,7 @@ if (( STATIC_SERVING == 1 )); then
   setup_static_serving
 else
   write_visualization_index
+  write_model_sheet_assets
 fi
 
 COLLECT_CMD="cd $(sq "${REPO_ROOT}") && $(sq "${VENV_PYTHON}") $(sq "${REPO_ROOT}/src/collect_sejong_tago.py") --config $(sq "${REPO_ROOT}/config/model_config.yaml") --env $(sq "${ENV_FILE}") --processed-dir $(sq "${PROCESSED_DIR}") --visualization-dir $(sq "${VISUALIZATION_DIR}") --lock-file $(sq "${LOCK_FILE}") >> $(sq "${LOG_FILE}") 2>&1"

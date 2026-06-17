@@ -58,6 +58,7 @@
     .sim-card b { display: block; margin-bottom: 5px; color: var(--ink); }
     .sim-card span { display: block; color: var(--muted); font-size: 13px; line-height: 1.55; }
     .sim-table { margin-top: 12px; max-height: none; }
+    .temporal-map-frame { width: 100%; height: 720px; border: 1px solid var(--line); border-radius: 8px; background: #fff; margin-top: 16px; }
     table { width: 100%; border-collapse: collapse; font-size: 13px; }
     th, td { border-bottom: 1px solid var(--line); padding: 9px 8px; text-align: right; vertical-align: top; }
     th:first-child, td:first-child { text-align: left; }
@@ -72,7 +73,7 @@
     .svg-value { font: 700 12px system-ui, sans-serif; fill: #172033; }
     iframe { width: 100%; height: 620px; border: 1px solid var(--line); border-radius: 8px; background: #fff; }
     .note { color: var(--muted); font-size: 13px; margin-top: 8px; }
-    @media (max-width: 920px) { .hero, .two, .three, .simulation-grid { grid-template-columns: 1fr; } .navlink { justify-self: start; } iframe { height: 500px; } }
+    @media (max-width: 920px) { .hero, .two, .three, .simulation-grid { grid-template-columns: 1fr; } .navlink { justify-self: start; } iframe { height: 500px; } .temporal-map-frame { height: 620px; } }
   </style>
 </head>
 <body>
@@ -104,7 +105,7 @@
               <strong><code>(p_i-v)</code>:</strong> ride 1건당 순수 운행마진입니다. <code>p_i</code>는 zone <code>i</code>에서 ride 1건이 만드는 평균 매출이고, <code>v</code>는 결제/정비/소모품 등 ride 1건이 발생할 때 같이 증가하는 변동비입니다.
               <br><strong><code>(p_i-v)Q_i(x_i)</code>:</strong> zone <code>i</code>에서 기대되는 총 운행이익입니다. 배치량 <code>x_i</code>가 커질수록 기대 ride 수 <code>Q_i(x_i)</code>가 늘어날 수 있으므로 이 항도 커질 수 있습니다.
               <br><strong><code>-c_i x_i</code>:</strong> PM을 배치해두는 데 드는 일 운영비입니다. ride가 발생하지 않아도 PM을 현장에 두면 충전 관리, 보험/감가, 현장 관리, 민원 대응 같은 비용이 생기므로 배치 대수 <code>x_i</code>에 비례해 차감합니다.
-              <br><strong><code>-r_i(x_i)</code>:</strong> 이용 후 흩어진 PM을 다음 운영 시작 전에 다시 회수하거나 재배치하는 기대 비용입니다. OD flow가 불균형한 zone일수록 이 비용이 커질 수 있습니다.
+              <br><strong><code>-r_i(x_i)</code>:</strong> 이용 후 흩어진 PM을 다음 운영 시작 전에 다시 회수하거나 재배치하는 기대 비용입니다. Origin-Destination Pair flow가 불균형한 zone일수록 이 비용이 커질 수 있습니다.
             </div>
           </div>
           <div class="equation">
@@ -121,7 +122,7 @@
             <div class="math">\[A_i=D_i\left(1+\lambda\frac{\log(1+C_i)}{\log(1+C_{\max})}\right)\]</div>
             <div class="equation-note">
               <strong>모델링 근거:</strong> <code>D_i</code>는 GBIKE device movement에서 추정한 기본 수요입니다. 하지만 경쟁사 PM이 많이 놓인 지역은 단순히 경쟁이 심한 곳일 뿐 아니라, PM 시장이 실제로 존재한다고 검증된 지역일 수도 있습니다.
-              <br><strong>운영자 이동 제외:</strong> <code>D_i</code>와 OD flow는 운영자가 차량으로 이동시킨 것으로 의심되는 segment를 제외한 clean movement만 사용합니다.
+              <br><strong>운영자 이동 제외:</strong> <code>D_i</code>와 Origin-Destination Pair flow는 운영자가 차량으로 이동시킨 것으로 의심되는 segment를 제외한 clean movement만 사용합니다.
               <br><strong>왜 log인가:</strong> 경쟁사가 0대에서 10대로 늘어나는 것은 강한 시장 신호지만, 100대에서 110대로 늘어나는 것은 추가 정보가 상대적으로 작습니다. 그래서 <code>log(1+C_i)</code>를 사용해 market validation 효과도 체감하도록 설계했습니다.
               <br><strong>λ의 의미:</strong> <code>λ</code>는 경쟁사 존재를 잠재수요 증가 신호로 얼마나 강하게 볼지 정하는 parameter입니다.
             </div>
@@ -133,101 +134,101 @@
         <h3>Decision Variables</h3>
         <div class="table-wrap compact-table" style="max-height:none;"><table><thead><tr><th>Variable</th><th>Domain</th><th>의미</th></tr></thead><tbody><tr><td class="math-cell">\(x_i\)</td><td class="math-cell">\(x_i \in \mathbb{Z}_{+}\) 또는 \(x_i \ge 0\)</td><td>04:00에 zone i에 배치할 GBIKE PM 수</td></tr><tr><td class="math-cell">\(Q_{is}\)</td><td class="math-cell">\(Q_{is} \ge 0\)</td><td>scenario s에서 zone i가 처리하는 기대 ride 수</td></tr><tr><td class="math-cell">\(r_i(x_i)\)</td><td class="math-cell">\(r_i(x_i) \ge 0\)</td><td>zone i에서 발생하는 기대 rebalancing cost</td></tr></tbody></table></div>
         <h3 style="margin-top:16px;">Constraints</h3>
-        <div class="table-wrap compact-table" style="max-height:none;"><table><thead><tr><th>Constraint</th><th>식</th><th>이유</th></tr></thead><tbody><tr><td>Fleet</td><td class="math-cell">\(\sum_i x_i = 500\)</td><td>이번 dashboard run에서는 500대를 반드시 배치하는 planning problem으로 둠</td></tr><tr><td>Capacity</td><td class="math-cell">\(0 \le x_i \le K_i\)</td><td>각 500m zone의 물리적/운영적 수용량</td></tr><tr><td>Demand capture</td><td class="math-cell">\(Q_{is} \le A_{is}\left(1-e^{-\frac{\beta x_i}{1+\theta C_{is}}}\right)\)</td><td>배치량 증가의 체감효과와 경쟁 압력</td></tr><tr><td>Device throughput</td><td class="math-cell">\(Q_{is} \le Ux_i\)</td><td>PM 1대가 하루 처리할 수 있는 최대 ride 수</td></tr><tr><td>Non-negativity</td><td class="math-cell">\(x_i,\; Q_{is},\; r_i(x_i) \ge 0\)</td><td>음수 배치나 음수 수요를 방지</td></tr></tbody></table></div>
+        <div class="table-wrap compact-table" style="max-height:none;"><table><thead><tr><th>Constraint</th><th>식</th><th>이유</th></tr></thead><tbody><tr><td>Fleet</td><td class="math-cell">\(\sum_i x_i = 2800\)</td><td>이번 dashboard run에서는 2,800대를 반드시 배치하는 planning problem으로 둠</td></tr><tr><td>Capacity</td><td class="math-cell">\(0 \le x_i \le K_i\)</td><td>각 500m zone의 물리적/운영적 수용량</td></tr><tr><td>Demand capture</td><td class="math-cell">\(Q_{is} \le A_{is}\left(1-e^{-\frac{\beta x_i}{1+\theta C_{is}}}\right)\)</td><td>배치량 증가의 체감효과와 경쟁 압력</td></tr><tr><td>Device throughput</td><td class="math-cell">\(Q_{is} \le Ux_i\)</td><td>PM 1대가 하루 처리할 수 있는 최대 ride 수</td></tr><tr><td>Non-negativity</td><td class="math-cell">\(x_i,\; Q_{is},\; r_i(x_i) \ge 0\)</td><td>음수 배치나 음수 수요를 방지</td></tr></tbody></table></div>
         <h3 style="margin-top:16px;">Static Parameters 현재 설정값</h3>
-        <div class="table-wrap compact-table" style="max-height:none;"><table><thead><tr><th>Parameter</th><th>현재 값</th><th>의미</th></tr></thead><tbody><tr><td class="math-cell">\(F\)</td><td>500</td><td>이번 run에서 배치할 전체 GBIKE PM 수</td></tr><tr><td class="math-cell">\(\lambda\)</td><td>0.30</td><td>경쟁사 존재를 market validation으로 반영하는 강도</td></tr><tr><td class="math-cell">\(\beta\)</td><td>0.08</td><td>GBIKE 배치량이 수요 capture로 전환되는 속도</td></tr><tr><td class="math-cell">\(\theta\)</td><td>1.00</td><td>ALPACA 공급량이 GBIKE capture를 약화시키는 정도</td></tr><tr><td class="math-cell">\(U\)</td><td>6.0</td><td>PM 1대가 하루 처리 가능한 최대 ride 수</td></tr><tr><td class="math-cell">\(p_i\)</td><td>2,200 KRW</td><td>현재 dashboard에서는 zone 공통 ride 1건 평균 매출로 둠</td></tr><tr><td class="math-cell">\(v\)</td><td>300 KRW</td><td>ride 1건당 변동비</td></tr><tr><td class="math-cell">\(c_i\)</td><td>2,500 KRW/day</td><td>PM 1대당 일 운영비</td></tr><tr><td class="math-cell">\(\rho\)</td><td>900 KRW/km</td><td>재배치 거리 1km당 비용</td></tr><tr><td class="math-cell">\(\kappa\)</td><td>1.25</td><td>\(K_i\) 계산에 쓰는 zone capacity multiplier</td></tr></tbody></table></div>
+        <div class="table-wrap compact-table" style="max-height:none;"><table><thead><tr><th>Parameter</th><th>현재 값</th><th>의미</th></tr></thead><tbody><tr><td class="math-cell">\(F\)</td><td>2,800</td><td>이번 run에서 배치할 전체 GBIKE PM 수</td></tr><tr><td class="math-cell">\(\lambda\)</td><td>0.30</td><td>경쟁사 존재를 market validation으로 반영하는 강도</td></tr><tr><td class="math-cell">\(\beta\)</td><td>0.08</td><td>GBIKE 배치량이 수요 capture로 전환되는 속도</td></tr><tr><td class="math-cell">\(\theta\)</td><td>1.00</td><td>ALPACA 공급량이 GBIKE capture를 약화시키는 정도</td></tr><tr><td class="math-cell">\(U\)</td><td>6.0</td><td>PM 1대가 하루 처리 가능한 최대 ride 수</td></tr><tr><td class="math-cell">\(p_i\)</td><td>2,200 KRW</td><td>현재 dashboard에서는 zone 공통 ride 1건 평균 매출로 둠</td></tr><tr><td class="math-cell">\(v\)</td><td>300 KRW</td><td>ride 1건당 변동비</td></tr><tr><td class="math-cell">\(c_i\)</td><td>2,500 KRW/day</td><td>PM 1대당 일 운영비</td></tr><tr><td class="math-cell">\(\rho\)</td><td>900 KRW/km</td><td>재배치 거리 1km당 비용</td></tr><tr><td class="math-cell">\(\kappa\)</td><td>1.25</td><td>\(K_i\) 계산에 쓰는 zone capacity multiplier</td></tr></tbody></table></div>
         <h3 style="margin-top:16px;">Data-derived Parameters 데이터에서 계산되는 값</h3>
-        <div class="table-wrap compact-table" style="max-height:none;"><table><thead><tr><th>Parameter</th><th>계산 방식</th><th>의미</th></tr></thead><tbody><tr><td class="math-cell">\(D_i\)</td><td>clean inferred ride origin count</td><td>운영자 이동 의심 flag가 없는 GBIKE 이동 segment만 사용한 zone별 기본 수요</td></tr><tr><td class="math-cell">\(C_i\)</td><td>latest ALPACA supply</td><td>zone별 ALPACA 경쟁 공급량</td></tr><tr><td class="math-cell">\(K_i\)</td><td>\(\lceil \kappa \cdot \text{current PM supply}_i \rceil\)</td><td>zone별 최대 배치 가능량</td></tr><tr><td class="math-cell">\(r_i(x_i)\)</td><td>clean OD flow 기반</td><td>운영자 이동 의심 segment를 제외한 OD로 추정한 회수/재배치 비용</td></tr></tbody></table></div>
+        <div class="table-wrap compact-table" style="max-height:none;"><table><thead><tr><th>Parameter</th><th>계산 방식</th><th>의미</th></tr></thead><tbody><tr><td class="math-cell">\(D_i\)</td><td>clean inferred ride origin count</td><td>운영자 이동 의심 flag가 없는 GBIKE 이동 segment만 사용한 zone별 기본 수요</td></tr><tr><td class="math-cell">\(C_i\)</td><td>latest ALPACA supply</td><td>zone별 ALPACA 경쟁 공급량</td></tr><tr><td class="math-cell">\(K_i\)</td><td>\(\lceil \kappa \cdot \text{current PM supply}_i \rceil\)</td><td>zone별 최대 배치 가능량</td></tr><tr><td class="math-cell">\(r_i(x_i)\)</td><td>clean Origin-Destination Pair flow 기반</td><td>운영자 이동 의심 segment를 제외한 Origin-Destination Pair로 추정한 회수/재배치 비용</td></tr></tbody></table></div>
         <div class="equation-note" style="margin-top:10px;">
-          <strong>운영자 이동 제외 Rule:</strong> 속도 &gt; 28km/h, 또는 속도 &gt; 25km/h이면서 30분 내 반복 고속 이동, 같은 시간/OD의 2대 이상 군집, 배터리 변화량 절댓값 20pp 이상인 segment는 <code>excluded_from_demand=true</code>로 두고 수요/OD 계산에서 제외합니다.
-          이번 run에서는 raw ride segment 14,772건 중 983건을 제외하고 13,789건을 사용했습니다.
+          <strong>운영자 이동 제외 Rule:</strong> 속도 &gt; 28km/h, 또는 속도 &gt; 25km/h이면서 30분 내 반복 고속 이동, 같은 시간/Origin-Destination Pair의 2대 이상 군집, 배터리 변화량 절댓값 20pp 이상인 segment는 <code>excluded_from_demand=true</code>로 두고 수요/Origin-Destination Pair 계산에서 제외합니다.
+          이번 run에서는 raw ride segment 22,132건 중 1,079건을 제외하고 21,053건을 사용했습니다.
         </div>
       </div>
     </section>
 
     <section class="card result" style="margin-top:16px;">
       <h2>3. 이번 Run의 최종 결과</h2>
-      <p style="margin-bottom:14px;">위 모델에 <code>Σᵢxᵢ = 500</code>라는 fleet constraint를 걸고 계산한 배치 결과입니다. 최상위 배치 zone은 <code>grid_8150_22782</code>입니다.</p>
+      <p style="margin-bottom:14px;">위 모델에 <code>Σᵢxᵢ = 2800</code>라는 fleet constraint를 걸고 계산한 배치 결과입니다. 최상위 배치 zone은 <code>grid_8151_22782</code>입니다.</p>
       <div class="grid three">
-        <div class="metric"><div class="label">배치 fleet</div><div class="value">500</div></div>
-        <div class="metric"><div class="label">활성 zone</div><div class="value">73</div></div>
-        <div class="metric"><div class="label">기대 rides</div><div class="value">2,466.3</div></div>
-        <div class="metric"><div class="label">기대 revenue 운행매출</div><div class="value">5,425,753</div></div>
-        <div class="metric"><div class="label">기대 total cost</div><div class="value">3,870,111</div></div>
-        <div class="metric"><div class="label">Objective value</div><div class="value">1,555,642</div></div>
+        <div class="metric"><div class="label">배치 fleet</div><div class="value">2,800</div></div>
+        <div class="metric"><div class="label">활성 zone</div><div class="value">226</div></div>
+        <div class="metric"><div class="label">기대 rides</div><div class="value">4,339.4</div></div>
+        <div class="metric"><div class="label">기대 revenue 운행매출</div><div class="value">9,546,641</div></div>
+        <div class="metric"><div class="label">기대 total cost</div><div class="value">11,744,153</div></div>
+        <div class="metric"><div class="label">Objective value</div><div class="value">-2,197,512</div></div>
       </div>
     </section>
 
     <section class="grid two" style="margin-top:16px;">
       <div class="card"><svg class="viz-svg" viewBox="0 0 900 544" role="img" aria-label="optimized allocation by zone">
 <text x="0" y="22" class="svg-title">최종 결과: x*가 큰 상위 zone</text>
-<text x="0" y="60" class="svg-label">grid_8150_22782</text>
+<text x="0" y="60" class="svg-label">grid_8151_22782</text>
 <rect x="172" y="47" width="580.0" height="17" rx="3" fill="#0f766e" opacity="0.86"></rect>
-<text x="762.0" y="60" class="svg-value">x*=60</text>
-<text x="0" y="90" class="svg-label">grid_8122_22777</text>
-<rect x="172" y="77" width="290.0" height="17" rx="3" fill="#0f766e" opacity="0.86"></rect>
-<text x="472.0" y="90" class="svg-value">x*=30</text>
-<text x="0" y="120" class="svg-label">grid_8128_22775</text>
-<rect x="172" y="107" width="261.0" height="17" rx="3" fill="#0f766e" opacity="0.86"></rect>
-<text x="443.0" y="120" class="svg-value">x*=27</text>
-<text x="0" y="150" class="svg-label">grid_8124_22776</text>
-<rect x="172" y="137" width="261.0" height="17" rx="3" fill="#0f766e" opacity="0.86"></rect>
-<text x="443.0" y="150" class="svg-value">x*=27</text>
-<text x="0" y="180" class="svg-label">grid_8127_22773</text>
-<rect x="172" y="167" width="251.3" height="17" rx="3" fill="#0f766e" opacity="0.86"></rect>
-<text x="433.3" y="180" class="svg-value">x*=26</text>
-<text x="0" y="210" class="svg-label">grid_8121_22782</text>
-<rect x="172" y="197" width="145.0" height="17" rx="3" fill="#0f766e" opacity="0.86"></rect>
-<text x="327.0" y="210" class="svg-value">x*=15</text>
-<text x="0" y="240" class="svg-label">grid_8133_22777</text>
-<rect x="172" y="227" width="135.3" height="17" rx="3" fill="#0f766e" opacity="0.86"></rect>
-<text x="317.3" y="240" class="svg-value">x*=14</text>
-<text x="0" y="270" class="svg-label">grid_8127_22777</text>
-<rect x="172" y="257" width="125.7" height="17" rx="3" fill="#0f766e" opacity="0.86"></rect>
-<text x="307.7" y="270" class="svg-value">x*=13</text>
-<text x="0" y="300" class="svg-label">grid_8122_22784</text>
-<rect x="172" y="287" width="116.0" height="17" rx="3" fill="#0f766e" opacity="0.86"></rect>
-<text x="298.0" y="300" class="svg-value">x*=12</text>
-<text x="0" y="330" class="svg-label">grid_8125_22777</text>
-<rect x="172" y="317" width="116.0" height="17" rx="3" fill="#0f766e" opacity="0.86"></rect>
-<text x="298.0" y="330" class="svg-value">x*=12</text>
-<text x="0" y="360" class="svg-label">grid_8123_22784</text>
-<rect x="172" y="347" width="96.7" height="17" rx="3" fill="#0f766e" opacity="0.86"></rect>
-<text x="278.7" y="360" class="svg-value">x*=10</text>
-<text x="0" y="390" class="svg-label">grid_8129_22773</text>
-<rect x="172" y="377" width="96.7" height="17" rx="3" fill="#0f766e" opacity="0.86"></rect>
-<text x="278.7" y="390" class="svg-value">x*=10</text>
-<text x="0" y="420" class="svg-label">grid_8129_22772</text>
-<rect x="172" y="407" width="87.0" height="17" rx="3" fill="#0f766e" opacity="0.86"></rect>
-<text x="269.0" y="420" class="svg-value">x*=9</text>
-<text x="0" y="450" class="svg-label">grid_8133_22778</text>
-<rect x="172" y="437" width="87.0" height="17" rx="3" fill="#0f766e" opacity="0.86"></rect>
-<text x="269.0" y="450" class="svg-value">x*=9</text>
-<text x="0" y="480" class="svg-label">grid_8127_22779</text>
-<rect x="172" y="467" width="77.3" height="17" rx="3" fill="#0f766e" opacity="0.86"></rect>
-<text x="259.3" y="480" class="svg-value">x*=8</text>
-<text x="0" y="510" class="svg-label">grid_8120_22780</text>
-<rect x="172" y="497" width="77.3" height="17" rx="3" fill="#0f766e" opacity="0.86"></rect>
-<text x="259.3" y="510" class="svg-value">x*=8</text>
+<text x="762.0" y="60" class="svg-value">x*=174</text>
+<text x="0" y="90" class="svg-label">grid_8150_22781</text>
+<rect x="172" y="77" width="426.7" height="17" rx="3" fill="#0f766e" opacity="0.86"></rect>
+<text x="608.7" y="90" class="svg-value">x*=128</text>
+<text x="0" y="120" class="svg-label">grid_8123_22775</text>
+<rect x="172" y="107" width="316.7" height="17" rx="3" fill="#0f766e" opacity="0.86"></rect>
+<text x="498.7" y="120" class="svg-value">x*=95</text>
+<text x="0" y="150" class="svg-label">grid_8097_22791</text>
+<rect x="172" y="137" width="260.0" height="17" rx="3" fill="#0f766e" opacity="0.86"></rect>
+<text x="442.0" y="150" class="svg-value">x*=78</text>
+<text x="0" y="180" class="svg-label">grid_8097_22792</text>
+<rect x="172" y="167" width="256.7" height="17" rx="3" fill="#0f766e" opacity="0.86"></rect>
+<text x="438.7" y="180" class="svg-value">x*=77</text>
+<text x="0" y="210" class="svg-label">grid_8149_22783</text>
+<rect x="172" y="197" width="213.3" height="17" rx="3" fill="#0f766e" opacity="0.86"></rect>
+<text x="395.3" y="210" class="svg-value">x*=64</text>
+<text x="0" y="240" class="svg-label">grid_8093_22792</text>
+<rect x="172" y="227" width="166.7" height="17" rx="3" fill="#0f766e" opacity="0.86"></rect>
+<text x="348.7" y="240" class="svg-value">x*=50</text>
+<text x="0" y="270" class="svg-label">grid_8096_22792</text>
+<rect x="172" y="257" width="163.3" height="17" rx="3" fill="#0f766e" opacity="0.86"></rect>
+<text x="345.3" y="270" class="svg-value">x*=49</text>
+<text x="0" y="300" class="svg-label">grid_8149_22782</text>
+<rect x="172" y="287" width="143.3" height="17" rx="3" fill="#0f766e" opacity="0.86"></rect>
+<text x="325.3" y="300" class="svg-value">x*=43</text>
+<text x="0" y="330" class="svg-label">grid_8094_22797</text>
+<rect x="172" y="317" width="140.0" height="17" rx="3" fill="#0f766e" opacity="0.86"></rect>
+<text x="322.0" y="330" class="svg-value">x*=42</text>
+<text x="0" y="360" class="svg-label">grid_8098_22787</text>
+<rect x="172" y="347" width="140.0" height="17" rx="3" fill="#0f766e" opacity="0.86"></rect>
+<text x="322.0" y="360" class="svg-value">x*=42</text>
+<text x="0" y="390" class="svg-label">grid_8094_22790</text>
+<rect x="172" y="377" width="126.7" height="17" rx="3" fill="#0f766e" opacity="0.86"></rect>
+<text x="308.7" y="390" class="svg-value">x*=38</text>
+<text x="0" y="420" class="svg-label">grid_8095_22792</text>
+<rect x="172" y="407" width="126.7" height="17" rx="3" fill="#0f766e" opacity="0.86"></rect>
+<text x="308.7" y="420" class="svg-value">x*=38</text>
+<text x="0" y="450" class="svg-label">grid_8133_22776</text>
+<rect x="172" y="437" width="123.3" height="17" rx="3" fill="#0f766e" opacity="0.86"></rect>
+<text x="305.3" y="450" class="svg-value">x*=37</text>
+<text x="0" y="480" class="svg-label">grid_8097_22793</text>
+<rect x="172" y="467" width="123.3" height="17" rx="3" fill="#0f766e" opacity="0.86"></rect>
+<text x="305.3" y="480" class="svg-value">x*=37</text>
+<text x="0" y="510" class="svg-label">grid_8150_22783</text>
+<rect x="172" y="497" width="110.0" height="17" rx="3" fill="#0f766e" opacity="0.86"></rect>
+<text x="292.0" y="510" class="svg-value">x*=33</text>
 </svg></div>
       <div class="card"><svg class="viz-svg" viewBox="0 0 900 320" role="img" aria-label="objective decomposition">
 <text x="0" y="24" class="svg-title">Objective value 분해: 운행매출 - 비용</text>
 <line x1="450" y1="42" x2="450" y2="264" stroke="#94a3b8"></line>
 <text x="0" y="73" class="svg-label">Ride revenue 운행매출</text>
 <rect x="450.0" y="58" width="330.0" height="20" rx="3" fill="#0f766e" opacity="0.82"></rect>
-<text x="160" y="73" class="svg-value">5,425,753 KRW</text>
+<text x="160" y="73" class="svg-value">9,546,641 KRW</text>
 <text x="0" y="115" class="svg-label">Variable cost 변동비</text>
 <rect x="405.0" y="100" width="45.0" height="20" rx="3" fill="#b45309" opacity="0.82"></rect>
-<text x="160" y="115" class="svg-value">-739,875 KRW</text>
+<text x="160" y="115" class="svg-value">-1,301,815 KRW</text>
 <text x="0" y="157" class="svg-label">Fixed cost 고정비</text>
-<rect x="374.0" y="142" width="76.0" height="20" rx="3" fill="#be123c" opacity="0.82"></rect>
-<text x="160" y="157" class="svg-value">-1,250,000 KRW</text>
+<rect x="208.0" y="142" width="242.0" height="20" rx="3" fill="#be123c" opacity="0.82"></rect>
+<text x="160" y="157" class="svg-value">-7,000,000 KRW</text>
 <text x="0" y="199" class="svg-label">Rebalancing cost 재배치비</text>
-<rect x="335.6" y="184" width="114.4" height="20" rx="3" fill="#2563eb" opacity="0.82"></rect>
-<text x="160" y="199" class="svg-value">-1,880,236 KRW</text>
+<rect x="331.0" y="184" width="119.0" height="20" rx="3" fill="#2563eb" opacity="0.82"></rect>
+<text x="160" y="199" class="svg-value">-3,442,338 KRW</text>
 <text x="0" y="241" class="svg-label">Net profit 순이익</text>
-<rect x="450.0" y="226" width="94.6" height="20" rx="3" fill="#172033" opacity="0.82"></rect>
-<text x="160" y="241" class="svg-value">1,555,642 KRW</text>
+<rect x="374.0" y="226" width="76.0" height="20" rx="3" fill="#172033" opacity="0.82"></rect>
+<text x="160" y="241" class="svg-value">-2,197,512 KRW</text>
 </svg></div>
     </section>
 
@@ -326,28 +327,28 @@
 <rect x="183.0" y="143.3" width="39.0" height="126.7" rx="3" fill="#0f766e" opacity="0.74"></rect>
 <rect x="226.0" y="80.0" width="39.0" height="190.0" rx="3" fill="#0f766e" opacity="0.74"></rect>
 <rect x="269.0" y="127.5" width="39.0" height="142.5" rx="3" fill="#0f766e" opacity="0.74"></rect>
-<rect x="312.0" y="206.7" width="39.0" height="63.3" rx="3" fill="#0f766e" opacity="0.74"></rect>
-<rect x="355.0" y="175.0" width="39.0" height="95.0" rx="3" fill="#0f766e" opacity="0.74"></rect>
-<rect x="398.0" y="206.7" width="39.0" height="63.3" rx="3" fill="#0f766e" opacity="0.74"></rect>
-<rect x="441.0" y="159.2" width="39.0" height="110.8" rx="3" fill="#0f766e" opacity="0.74"></rect>
+<rect x="312.0" y="190.8" width="39.0" height="79.2" rx="3" fill="#0f766e" opacity="0.74"></rect>
+<rect x="355.0" y="190.8" width="39.0" height="79.2" rx="3" fill="#0f766e" opacity="0.74"></rect>
+<rect x="398.0" y="190.8" width="39.0" height="79.2" rx="3" fill="#0f766e" opacity="0.74"></rect>
+<rect x="441.0" y="175.0" width="39.0" height="95.0" rx="3" fill="#0f766e" opacity="0.74"></rect>
 <rect x="484.0" y="175.0" width="39.0" height="95.0" rx="3" fill="#0f766e" opacity="0.74"></rect>
-<rect x="527.0" y="175.0" width="39.0" height="95.0" rx="3" fill="#0f766e" opacity="0.74"></rect>
-<rect x="570.0" y="175.0" width="39.0" height="95.0" rx="3" fill="#0f766e" opacity="0.74"></rect>
-<rect x="613.0" y="80.0" width="39.0" height="190.0" rx="3" fill="#0f766e" opacity="0.74"></rect>
+<rect x="527.0" y="159.2" width="39.0" height="110.8" rx="3" fill="#0f766e" opacity="0.74"></rect>
+<rect x="570.0" y="159.2" width="39.0" height="110.8" rx="3" fill="#0f766e" opacity="0.74"></rect>
+<rect x="613.0" y="111.7" width="39.0" height="158.3" rx="3" fill="#0f766e" opacity="0.74"></rect>
 <rect x="656.0" y="206.7" width="39.0" height="63.3" rx="3" fill="#0f766e" opacity="0.74"></rect>
 <rect x="699.0" y="159.2" width="39.0" height="110.8" rx="3" fill="#0f766e" opacity="0.74"></rect>
 <rect x="742.0" y="190.8" width="39.0" height="79.2" rx="3" fill="#0f766e" opacity="0.74"></rect>
 <rect x="785.0" y="206.7" width="39.0" height="63.3" rx="3" fill="#0f766e" opacity="0.74"></rect>
-<line x1="131.4" y1="80" x2="131.4" y2="270" stroke="#be123c" stroke-width="2" stroke-dasharray="4 4"></line>
-<text x="136.4" y="98" class="svg-label">P10: 619,090 KRW</text>
-<line x1="412.3" y1="80" x2="412.3" y2="270" stroke="#2563eb" stroke-width="2" stroke-dasharray="4 4"></line>
-<text x="417.3" y="98" class="svg-label">P50: 1,495,007 KRW</text>
-<line x1="731.6" y1="80" x2="731.6" y2="270" stroke="#0f766e" stroke-width="2" stroke-dasharray="4 4"></line>
-<text x="736.6" y="98" class="svg-label">P90: 2,490,727 KRW</text>
-<line x1="431.7" y1="80" x2="431.7" y2="270" stroke="#172033" stroke-width="2"></line>
-<text x="436.7" y="262" class="svg-value">baseline: 1,555,642 KRW</text>
-<text x="54" y="288" class="svg-label">377,707</text>
-<text x="766" y="288" class="svg-label">2,778,859</text>
+<line x1="132.1" y1="80" x2="132.1" y2="270" stroke="#be123c" stroke-width="2" stroke-dasharray="4 4"></line>
+<text x="137.1" y="98" class="svg-label">P10: -3,855,702 KRW</text>
+<line x1="408.6" y1="80" x2="408.6" y2="270" stroke="#2563eb" stroke-width="2" stroke-dasharray="4 4"></line>
+<text x="413.6" y="98" class="svg-label">P50: -2,324,430 KRW</text>
+<line x1="730.4" y1="80" x2="730.4" y2="270" stroke="#0f766e" stroke-width="2" stroke-dasharray="4 4"></line>
+<text x="735.4" y="98" class="svg-label">P90: -542,217 KRW</text>
+<line x1="431.5" y1="80" x2="431.5" y2="270" stroke="#172033" stroke-width="2"></line>
+<text x="436.5" y="262" class="svg-value">baseline: -2,197,512 KRW</text>
+<text x="54" y="288" class="svg-label">-4,288,110</text>
+<text x="766" y="288" class="svg-label">-23,895</text>
 </svg>
       <div class="simulation-grid">
         <div class="sim-card">
@@ -372,12 +373,12 @@
           <thead><tr><th>항목</th><th>값</th><th>해석</th></tr></thead>
           <tbody>
             <tr><td>Scenario 수</td><td>120</td><td>서로 다른 demand/cost 조합을 120번 계산</td></tr>
-            <tr><td>Baseline objective</td><td>1,555,642 KRW</td><td>shock를 주지 않은 기존 최적화 결과의 profit</td></tr>
-            <tr><td>P10 objective</td><td>619,090 KRW</td><td>나쁜 쪽 10% scenario에서 기대할 수 있는 하방 profit 기준</td></tr>
-            <tr><td>P50 objective</td><td>1,495,007 KRW</td><td>shock scenario들의 중앙값</td></tr>
-            <tr><td>P90 objective</td><td>2,490,727 KRW</td><td>좋은 쪽 10% scenario에서의 상방 profit 기준</td></tr>
-            <tr><td>P90 - P10</td><td>1,871,636 KRW</td><td>같은 배치안의 objective 변동폭</td></tr>
-            <tr><td>Baseline - P10</td><td>936,551 KRW</td><td>기준 예측 대비 하방으로 밀릴 수 있는 폭</td></tr>
+            <tr><td>Baseline objective</td><td>-2,197,512 KRW</td><td>shock를 주지 않은 기존 최적화 결과의 profit</td></tr>
+            <tr><td>P10 objective</td><td>-3,855,702 KRW</td><td>나쁜 쪽 10% scenario에서 기대할 수 있는 하방 profit 기준</td></tr>
+            <tr><td>P50 objective</td><td>-2,324,430 KRW</td><td>shock scenario들의 중앙값</td></tr>
+            <tr><td>P90 objective</td><td>-542,217 KRW</td><td>좋은 쪽 10% scenario에서의 상방 profit 기준</td></tr>
+            <tr><td>P90 - P10</td><td>3,313,484 KRW</td><td>같은 배치안의 objective 변동폭</td></tr>
+            <tr><td>Baseline - P10</td><td>1,658,190 KRW</td><td>기준 예측 대비 하방으로 밀릴 수 있는 폭</td></tr>
           </tbody>
         </table>
       </div>
@@ -387,8 +388,61 @@
     <section class="card" style="margin-top:16px;">
       <h2>Solution Table 최종 결과표</h2>
       <p>아래 표는 최종 배치량 <code>x*</code>, 해당 배치에서의 기대 ride <code>Q(x*)</code>, 경쟁 공급 <code>Cᵢ</code>, capacity <code>Kᵢ</code>, zone별 objective contribution을 함께 보여줍니다.</p>
-      <div class="table-wrap"><table><thead><tr><th>Zone</th><th>x*</th><th>Q(x*)</th><th>현재 GBIKE</th><th>ALPACA</th><th>Aᵢ</th><th>Profit</th><th>Rides/device</th></tr></thead><tbody><tr><td>grid_8150_22782</td><td>60</td><td>177.22</td><td>74</td><td>6</td><td>357.10</td><td>104,808</td><td>2.95</td></tr><tr><td>grid_8122_22777</td><td>30</td><td>180.00</td><td>37</td><td>0</td><td>278.00</td><td>133,822</td><td>6.00</td></tr><tr><td>grid_8128_22775</td><td>27</td><td>162.00</td><td>21</td><td>0</td><td>323.00</td><td>109,635</td><td>6.00</td></tr><tr><td>grid_8124_22776</td><td>27</td><td>162.00</td><td>108</td><td>0</td><td>607.00</td><td>106,158</td><td>6.00</td></tr><tr><td>grid_8127_22773</td><td>26</td><td>156.00</td><td>33</td><td>0</td><td>179.00</td><td>112,309</td><td>6.00</td></tr><tr><td>grid_8121_22782</td><td>15</td><td>90.00</td><td>56</td><td>0</td><td>189.00</td><td>61,573</td><td>6.00</td></tr><tr><td>grid_8133_22777</td><td>14</td><td>59.29</td><td>11</td><td>0</td><td>88.00</td><td>44,861</td><td>4.23</td></tr><tr><td>grid_8127_22777</td><td>13</td><td>78.00</td><td>50</td><td>0</td><td>237.00</td><td>43,057</td><td>6.00</td></tr><tr><td>grid_8122_22784</td><td>12</td><td>59.24</td><td>9</td><td>0</td><td>96.00</td><td>40,200</td><td>4.94</td></tr><tr><td>grid_8125_22777</td><td>12</td><td>51.22</td><td>27</td><td>0</td><td>83.00</td><td>30,439</td><td>4.27</td></tr><tr><td>grid_8123_22784</td><td>10</td><td>41.30</td><td>20</td><td>0</td><td>75.00</td><td>22,055</td><td>4.13</td></tr><tr><td>grid_8129_22773</td><td>10</td><td>36.34</td><td>18</td><td>0</td><td>66.00</td><td>19,023</td><td>3.63</td></tr><tr><td>grid_8129_22772</td><td>9</td><td>30.28</td><td>13</td><td>0</td><td>59.00</td><td>16,286</td><td>3.36</td></tr><tr><td>grid_8133_22778</td><td>9</td><td>31.31</td><td>18</td><td>0</td><td>61.00</td><td>15,952</td><td>3.48</td></tr><tr><td>grid_8127_22779</td><td>8</td><td>32.14</td><td>27</td><td>0</td><td>68.00</td><td>12,016</td><td>4.02</td></tr><tr><td>grid_8120_22780</td><td>8</td><td>33.56</td><td>21</td><td>0</td><td>71.00</td><td>11,825</td><td>4.20</td></tr><tr><td>grid_8128_22772</td><td>7</td><td>42.00</td><td>49</td><td>0</td><td>154.00</td><td>34,362</td><td>6.00</td></tr><tr><td>grid_8121_22776</td><td>7</td><td>42.00</td><td>52</td><td>0</td><td>178.00</td><td>33,428</td><td>6.00</td></tr><tr><td>grid_8128_22778</td><td>7</td><td>42.00</td><td>7</td><td>0</td><td>161.00</td><td>32,912</td><td>6.00</td></tr><tr><td>grid_8130_22774</td><td>7</td><td>42.00</td><td>15</td><td>0</td><td>151.00</td><td>28,571</td><td>6.00</td></tr><tr><td>grid_8126_22773</td><td>7</td><td>32.59</td><td>42</td><td>0</td><td>76.00</td><td>10,862</td><td>4.66</td></tr><tr><td>grid_8130_22777</td><td>7</td><td>24.01</td><td>10</td><td>0</td><td>56.00</td><td>10,829</td><td>3.43</td></tr><tr><td>grid_8123_22774</td><td>7</td><td>25.73</td><td>10</td><td>0</td><td>60.00</td><td>10,139</td><td>3.68</td></tr><tr><td>grid_8130_22776</td><td>7</td><td>22.30</td><td>18</td><td>0</td><td>52.00</td><td>9,435</td><td>3.19</td></tr></tbody></table></div>
+      <div class="table-wrap"><table><thead><tr><th>Zone</th><th>x*</th><th>Q(x*)</th><th>현재 GBIKE</th><th>ALPACA</th><th>Aᵢ</th><th>Profit</th><th>Rides/device</th></tr></thead><tbody><tr><td>grid_8151_22782</td><td>174</td><td>145.53</td><td>98</td><td>41</td><td>515.88</td><td>-239,128</td><td>0.84</td></tr><tr><td>grid_8150_22781</td><td>128</td><td>102.74</td><td>87</td><td>15</td><td>217.34</td><td>-185,130</td><td>0.80</td></tr><tr><td>grid_8123_22775</td><td>95</td><td>570.00</td><td>76</td><td>0</td><td>788.00</td><td>453,059</td><td>6.00</td></tr><tr><td>grid_8097_22791</td><td>78</td><td>0.00</td><td>0</td><td>62</td><td>0.00</td><td>-195,000</td><td>0.00</td></tr><tr><td>grid_8097_22792</td><td>77</td><td>0.00</td><td>0</td><td>61</td><td>0.00</td><td>-192,500</td><td>0.00</td></tr><tr><td>grid_8149_22783</td><td>64</td><td>73.05</td><td>34</td><td>17</td><td>295.07</td><td>-74,540</td><td>1.14</td></tr><tr><td>grid_8093_22792</td><td>50</td><td>0.00</td><td>0</td><td>40</td><td>0.00</td><td>-125,000</td><td>0.00</td></tr><tr><td>grid_8096_22792</td><td>49</td><td>0.00</td><td>0</td><td>39</td><td>0.00</td><td>-122,500</td><td>0.00</td></tr><tr><td>grid_8149_22782</td><td>43</td><td>64.43</td><td>26</td><td>8</td><td>202.84</td><td>-31,749</td><td>1.50</td></tr><tr><td>grid_8094_22797</td><td>42</td><td>0.00</td><td>0</td><td>33</td><td>0.00</td><td>-105,000</td><td>0.00</td></tr><tr><td>grid_8098_22787</td><td>42</td><td>0.00</td><td>0</td><td>33</td><td>0.00</td><td>-105,000</td><td>0.00</td></tr><tr><td>grid_8094_22790</td><td>38</td><td>0.00</td><td>0</td><td>30</td><td>0.00</td><td>-95,000</td><td>0.00</td></tr><tr><td>grid_8095_22792</td><td>38</td><td>0.00</td><td>0</td><td>30</td><td>0.00</td><td>-95,000</td><td>0.00</td></tr><tr><td>grid_8133_22776</td><td>37</td><td>50.25</td><td>29</td><td>0</td><td>53.00</td><td>-34,950</td><td>1.36</td></tr><tr><td>grid_8097_22793</td><td>37</td><td>0.00</td><td>0</td><td>29</td><td>0.00</td><td>-92,500</td><td>0.00</td></tr><tr><td>grid_8150_22783</td><td>33</td><td>35.31</td><td>16</td><td>10</td><td>165.48</td><td>-35,985</td><td>1.07</td></tr><tr><td>grid_8122_22783</td><td>32</td><td>53.52</td><td>25</td><td>0</td><td>58.00</td><td>-10,436</td><td>1.67</td></tr><tr><td>grid_8094_22793</td><td>30</td><td>0.00</td><td>0</td><td>24</td><td>0.00</td><td>-75,000</td><td>0.00</td></tr><tr><td>grid_8095_22794</td><td>30</td><td>0.00</td><td>0</td><td>24</td><td>0.00</td><td>-75,000</td><td>0.00</td></tr><tr><td>grid_8126_22772</td><td>28</td><td>51.83</td><td>22</td><td>0</td><td>58.00</td><td>-33,703</td><td>1.85</td></tr><tr><td>grid_8132_22776</td><td>28</td><td>30.38</td><td>22</td><td>0</td><td>34.00</td><td>-34,541</td><td>1.09</td></tr><tr><td>grid_8091_22791</td><td>28</td><td>0.00</td><td>0</td><td>22</td><td>0.00</td><td>-70,000</td><td>0.00</td></tr><tr><td>grid_8092_22790</td><td>28</td><td>0.00</td><td>0</td><td>22</td><td>0.00</td><td>-70,000</td><td>0.00</td></tr><tr><td>grid_8126_22776</td><td>26</td><td>156.00</td><td>26</td><td>0</td><td>286.00</td><td>100,156</td><td>6.00</td></tr></tbody></table></div>
+    </section>
+
+    <section class="card result" style="margin-top:16px;">
+      
+      <h2>Origin-Destination Pair 기반 하루 재고 Simulation: P* 사후 검증</h2>
+      <p>
+        이 Simulation은 최적화 결과 <code>P*=x*</code>를 GCOO의 04:00 초기 배치로 고정한 뒤,
+        GBIKE와 ALPACA의 clean Origin-Destination Pair 이동 빈도를 함께 사용해 1시간 간격으로 PM 재고가 어떻게 흘러가는지 검증합니다.
+        목적은 기존 static model이 하루 중 PM의 누적 이동과 특정 zone의 공급 부족을 얼마나 놓치는지 측정하는 것입니다.
+      </p>
+      <div class="equation" style="margin-top:12px;">
+        <b>시간대별 Origin-Destination Pair 수요 생성 방식</b>
+        <div class="math">\[\log(1+y_{d,h,o,r})=\alpha+\gamma_h+\delta_{o,r}+\epsilon\]</div>
+        <div class="equation-note">
+          <strong>회귀:</strong> 관측된 clean ride segment를 04:00 기준 operating day, 시간대 <code>h</code>, Origin-Destination Pair <code>o→r</code>로 집계한 뒤,
+          <code>log(1 + count_{day,hour,Origin-Destination Pair}) = alpha + hour_effect + origin_destination_pair_effect + error</code>를 <code>balanced fixed-effect closed form over sparse Origin-Destination Pair/hour counts</code> 방식으로 추정했습니다.
+          관측 Origin-Destination Pair rate 총량은 validation 기준인 optimization 기대 ride <code>sum_i Q_i(x_i*)</code>와 맞도록
+          factor <code>1.367</code>을 곱해 보정했습니다.
+          <br><strong>Random value:</strong> 시간 공통 shock와 origin별 shock를 섞은 correlated standard normal <code>Z</code>를 만들고,
+          <code>λ̂·exp(σZ-σ²/2)</code>를 Poisson rate로 사용했습니다. 이는 Excel의 <code>NORM.INV</code>로 상관된 분위수를 normal shock로 바꾸는 원리와 같습니다.
+          <br><strong>초기 재고:</strong> GCOO는 <code>P*=x*</code> 2,800대, ALPACA는 latest snapshot 1,368대를 사용해 총 4,168대로 시작합니다.
+        </div>
+      </div>
+      <div class="grid three" style="margin-top:14px;">
+        <div class="metric"><div class="label">Target Q(x*) rides</div><div class="value">4,339.4</div></div>
+        <div class="metric"><div class="label">Simulated combined demand</div><div class="value">4,210</div></div>
+        <div class="metric"><div class="label">Demand gap</div><div class="value">-3.0%</div></div>
+        <div class="metric"><div class="label">Served rides</div><div class="value">3,581</div></div>
+        <div class="metric"><div class="label">Unmet rides</div><div class="value">629</div></div>
+        <div class="metric"><div class="label">Service rate</div><div class="value">85.1%</div></div>
+        <div class="metric"><div class="label">Modeled Origin-Destination Pairs</div><div class="value">3,221</div></div>
+        <div class="metric"><div class="label">Calibration factor</div><div class="value">1.37</div></div>
+        <div class="metric"><div class="label">Shortage zones</div><div class="value">71</div></div>
+        <div class="metric"><div class="label">Peak shortage hour</div><div class="value">17:00-18:00</div></div>
+      </div>
+      <iframe class="temporal-map-frame" src="./temporal_inventory_map.html" title="Origin-Destination Pair based temporal inventory simulation map"></iframe>
+      <div class="grid two" style="margin-top:16px;">
+        <div>
+          <h3>시간대별 처리율</h3>
+          <div class="table-wrap compact-table sim-table"><table><thead><tr><th>시간대</th><th>수요</th><th>처리</th><th>미처리</th><th>처리율</th><th>종료 재고</th></tr></thead><tbody><tr><td>04:00-05:00</td><td>40</td><td>39</td><td>1</td><td>97.5%</td><td>4,168</td></tr><tr><td>05:00-06:00</td><td>33</td><td>32</td><td>1</td><td>97.0%</td><td>4,168</td></tr><tr><td>06:00-07:00</td><td>54</td><td>53</td><td>1</td><td>98.1%</td><td>4,168</td></tr><tr><td>07:00-08:00</td><td>86</td><td>81</td><td>5</td><td>94.2%</td><td>4,168</td></tr><tr><td>08:00-09:00</td><td>199</td><td>161</td><td>38</td><td>80.9%</td><td>4,168</td></tr><tr><td>09:00-10:00</td><td>142</td><td>107</td><td>35</td><td>75.4%</td><td>4,168</td></tr><tr><td>10:00-11:00</td><td>121</td><td>99</td><td>22</td><td>81.8%</td><td>4,168</td></tr><tr><td>11:00-12:00</td><td>156</td><td>129</td><td>27</td><td>82.7%</td><td>4,168</td></tr><tr><td>12:00-13:00</td><td>153</td><td>127</td><td>26</td><td>83.0%</td><td>4,168</td></tr><tr><td>13:00-14:00</td><td>136</td><td>127</td><td>9</td><td>93.4%</td><td>4,168</td></tr><tr><td>14:00-15:00</td><td>202</td><td>169</td><td>33</td><td>83.7%</td><td>4,168</td></tr><tr><td>15:00-16:00</td><td>214</td><td>174</td><td>40</td><td>81.3%</td><td>4,168</td></tr><tr><td>16:00-17:00</td><td>336</td><td>271</td><td>65</td><td>80.7%</td><td>4,168</td></tr><tr><td>17:00-18:00</td><td>335</td><td>258</td><td>77</td><td>77.0%</td><td>4,168</td></tr><tr><td>18:00-19:00</td><td>298</td><td>258</td><td>40</td><td>86.6%</td><td>4,168</td></tr><tr><td>19:00-20:00</td><td>194</td><td>176</td><td>18</td><td>90.7%</td><td>4,168</td></tr><tr><td>20:00-21:00</td><td>241</td><td>207</td><td>34</td><td>85.9%</td><td>4,168</td></tr><tr><td>21:00-22:00</td><td>211</td><td>195</td><td>16</td><td>92.4%</td><td>4,168</td></tr><tr><td>22:00-23:00</td><td>331</td><td>276</td><td>55</td><td>83.4%</td><td>4,168</td></tr><tr><td>23:00-00:00</td><td>271</td><td>233</td><td>38</td><td>86.0%</td><td>4,168</td></tr><tr><td>00:00-01:00</td><td>197</td><td>175</td><td>22</td><td>88.8%</td><td>4,168</td></tr><tr><td>01:00-02:00</td><td>99</td><td>88</td><td>11</td><td>88.9%</td><td>4,168</td></tr><tr><td>02:00-03:00</td><td>88</td><td>79</td><td>9</td><td>89.8%</td><td>4,168</td></tr><tr><td>03:00-04:00</td><td>73</td><td>67</td><td>6</td><td>91.8%</td><td>4,168</td></tr></tbody></table></div>
+        </div>
+        <div>
+          <h3>PM 부족 기록</h3>
+          <p class="note">전체 shortage log는 <a href="./temporal_inventory_shortages.csv">temporal_inventory_shortages.csv</a>에, 전체 simulated Origin-Destination Pair movement log는 <a href="./temporal_inventory_od_movements.csv">temporal_inventory_od_movements.csv</a>에 저장됩니다.</p>
+          <div class="table-wrap compact-table sim-table"><table><thead><tr><th>시간대</th><th>Zone</th><th>수요</th><th>처리</th><th>부족</th><th>시작 재고</th></tr></thead><tbody><tr><td>17:00-18:00</td><td>grid_8123_22776</td><td>21</td><td>11</td><td>10</td><td>11</td></tr><tr><td>17:00-18:00</td><td>grid_8125_22775</td><td>17</td><td>8</td><td>9</td><td>8</td></tr><tr><td>14:00-15:00</td><td>grid_8125_22776</td><td>10</td><td>2</td><td>8</td><td>2</td></tr><tr><td>15:00-16:00</td><td>grid_8124_22774</td><td>10</td><td>2</td><td>8</td><td>2</td></tr><tr><td>18:00-19:00</td><td>grid_8128_22778</td><td>10</td><td>2</td><td>8</td><td>2</td></tr><tr><td>11:00-12:00</td><td>grid_8129_22777</td><td>10</td><td>3</td><td>7</td><td>3</td></tr><tr><td>14:00-15:00</td><td>grid_8129_22777</td><td>13</td><td>6</td><td>7</td><td>6</td></tr><tr><td>16:00-17:00</td><td>grid_8128_22772</td><td>7</td><td>0</td><td>7</td><td>0</td></tr><tr><td>22:00-23:00</td><td>grid_8120_22776</td><td>7</td><td>0</td><td>7</td><td>0</td></tr><tr><td>22:00-23:00</td><td>grid_8121_22777</td><td>8</td><td>1</td><td>7</td><td>1</td></tr><tr><td>09:00-10:00</td><td>grid_8129_22777</td><td>9</td><td>3</td><td>6</td><td>3</td></tr><tr><td>16:00-17:00</td><td>grid_8125_22776</td><td>10</td><td>4</td><td>6</td><td>4</td></tr><tr><td>23:00-00:00</td><td>grid_8127_22777</td><td>9</td><td>3</td><td>6</td><td>3</td></tr><tr><td>09:00-10:00</td><td>grid_8126_22774</td><td>5</td><td>0</td><td>5</td><td>0</td></tr><tr><td>10:00-11:00</td><td>grid_8129_22777</td><td>7</td><td>2</td><td>5</td><td>2</td></tr><tr><td>12:00-13:00</td><td>grid_8126_22775</td><td>10</td><td>5</td><td>5</td><td>5</td></tr><tr><td>15:00-16:00</td><td>grid_8125_22774</td><td>5</td><td>0</td><td>5</td><td>0</td></tr><tr><td>16:00-17:00</td><td>grid_8127_22775</td><td>8</td><td>3</td><td>5</td><td>3</td></tr><tr><td>16:00-17:00</td><td>grid_8122_22784</td><td>6</td><td>1</td><td>5</td><td>1</td></tr><tr><td>16:00-17:00</td><td>grid_8121_22776</td><td>5</td><td>0</td><td>5</td><td>0</td></tr><tr><td>17:00-18:00</td><td>grid_8121_22775</td><td>7</td><td>2</td><td>5</td><td>2</td></tr><tr><td>17:00-18:00</td><td>grid_8123_22777</td><td>7</td><td>2</td><td>5</td><td>2</td></tr><tr><td>18:00-19:00</td><td>grid_8127_22774</td><td>6</td><td>1</td><td>5</td><td>1</td></tr><tr><td>20:00-21:00</td><td>grid_8123_22776</td><td>11</td><td>6</td><td>5</td><td>6</td></tr><tr><td>20:00-21:00</td><td>grid_8126_22775</td><td>7</td><td>2</td><td>5</td><td>2</td></tr><tr><td>22:00-23:00</td><td>grid_8123_22776</td><td>12</td><td>7</td><td>5</td><td>7</td></tr><tr><td>23:00-00:00</td><td>grid_8126_22775</td><td>11</td><td>6</td><td>5</td><td>6</td></tr><tr><td>00:00-01:00</td><td>grid_8124_22776</td><td>13</td><td>8</td><td>5</td><td>8</td></tr><tr><td>08:00-09:00</td><td>grid_8124_22776</td><td>8</td><td>4</td><td>4</td><td>4</td></tr><tr><td>08:00-09:00</td><td>grid_8128_22774</td><td>6</td><td>2</td><td>4</td><td>2</td></tr></tbody></table></div>
+        </div>
+      </div>
+      <p class="note">
+        해석: unmet rides가 0에 가까우면 현재 <code>P*</code>가 Origin-Destination Pair 이동을 고려해도 combined market demand를 잘 흡수한다는 뜻입니다.
+        반대로 특정 시간대/zone에서 shortage가 반복되면, static objective에는 보이지 않았던 시간대별 공급 부족이 남아 있다는 신호입니다.
+      </p>
+    
     </section>
   </main>
+  <script defer src="./hermes_widget.js"></script>
 </body>
 </html>
