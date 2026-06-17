@@ -2,6 +2,7 @@
 .venv/
 logs/
 data/raw/*.lock
+outputs/visualizations/hermes_lab_workspace/
 *.__pycache__/
 *.pyc
 *.pyd

@@ -1,19 +1,24 @@
 {
   "ok": true,
-  "created_at": "2026-06-17T22:25:30+09:00",
-  "raw_file_count": 1293,
-  "snapshot_count": 1293,
-  "row_count": 5389010,
-  "latest_timestamp": "2026-06-17T22:20:13+0900",
+  "created_at": "2026-06-18T02:51:09+09:00",
+  "raw_file_count": 1335,
+  "snapshot_count": 1335,
+  "row_count": 5565032,
+  "latest_timestamp": "2026-06-18T02:45:10+0900",
   "latest_device_count": 4191,
   "latest_effective_device_count": 4191,
   "operator_counts_latest": {
     "ALPACA": 1368,
     "GBIKE": 2823
   },
-  "device_interval_count": 5384819,
-  "moved_50m_interval_count": 23335,
-  "moved_200m_interval_count": 22131,
+  "device_interval_count": 5560841,
+  "moved_50m_interval_count": 23894,
+  "moved_200m_interval_count": 22678,
+  "movement_thresholds": {
+    "moved_50m_threshold_m": 50.0,
+    "moved_200m_threshold_m": 200.0,
+    "scaling": "none; movement proxy thresholds intentionally preserve the original fixed-distance behavior"
+  },
   "zone_size_m": 500,
   "grid": {
     "lat_step": 0.0044915558749550845,
