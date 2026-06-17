@@ -1,0 +1,1 @@
+{"response":{"header":{"resultCode":"00","resultMsg":"NORMAL SERVICE."},"body":{"items":{"item":[{"citycode":"12","cityname":"세종특별시","providername":"ALPACA"},{"citycode":"12","cityname":"세종특별시","providername":"GBIKE"}]},"numOfRows":1000,"pageNo":1,"totalCount":2}}}
