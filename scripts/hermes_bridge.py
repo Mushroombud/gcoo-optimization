@@ -25,7 +25,12 @@ VISUALIZATION_ROOT = REPO_ROOT / "outputs" / "visualizations"
 LAB_ROOT = VISUALIZATION_ROOT / "hermes_lab_workspace"
 RAW_DATA_ROOT = REPO_ROOT / "data" / "raw"
 HERMES_ROOT = REPO_ROOT.parent / "hermes-agent"
-HERMES_VENV_PYTHON = Path("/usr/local/lib/hermes-agent/venv/bin/python")
+HERMES_PYTHON_CANDIDATES = (
+    HERMES_ROOT / ".venv" / "bin" / "python",
+    HERMES_ROOT / "venv" / "bin" / "python",
+    Path("/usr/local/lib/hermes-agent/.venv/bin/python"),
+    Path("/usr/local/lib/hermes-agent/venv/bin/python"),
+)
 MEMORY_PATH = REPO_ROOT / "Memory.md"
 LAB_FORBIDDEN_RELATIVE_PREFIXES = (Path("data/raw"),)
 ORIGINAL_PROTECTED_PATHS = (
@@ -44,13 +49,17 @@ def maybe_reexec_with_hermes_python() -> None:
         return
     if os.environ.get("GCOO_HERMES_BRIDGE_REEXEC"):
         return
-    if not HERMES_VENV_PYTHON.exists():
-        return
     current = Path(sys.executable)
-    if current.resolve() == HERMES_VENV_PYTHON.resolve():
-        return
-    os.environ["GCOO_HERMES_BRIDGE_REEXEC"] = "1"
-    os.execv(str(HERMES_VENV_PYTHON), [str(HERMES_VENV_PYTHON), *sys.argv])
+    env_python = os.environ.get("GCOO_HERMES_PYTHON") or os.environ.get("HERMES_AGENT_PYTHON")
+    candidates = ((Path(env_python),) if env_python else ()) + HERMES_PYTHON_CANDIDATES
+    for candidate in candidates:
+        if not candidate.exists():
+            continue
+        resolved = candidate.resolve()
+        if current.resolve() == resolved:
+            return
+        os.environ["GCOO_HERMES_BRIDGE_REEXEC"] = "1"
+        os.execv(str(resolved), [str(resolved), *sys.argv])
 
 
 if str(HERMES_ROOT) not in sys.path:
