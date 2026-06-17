@@ -11,10 +11,11 @@
       --muted: #5d687a;
       --line: #d9e0ea;
       --panel: #ffffff;
-      --seoul: #176b87;
       --sejong: #6d5f15;
       --model: #0f766e;
-      --lab: #7c2d12;
+      --lab: #8a2c0d;
+      --lab-deep: #13213a;
+      --lab-hot: #f97316;
     }
     * { box-sizing: border-box; }
     body {
@@ -42,28 +43,6 @@
     section {
       margin-top: 26px;
     }
-    .tabs {
-      display: flex;
-      gap: 8px;
-      flex-wrap: wrap;
-      margin: 26px 0 8px;
-      border-bottom: 1px solid var(--line);
-    }
-    .tab {
-      min-height: 0;
-      padding: 10px 14px;
-      border: 1px solid var(--line);
-      border-bottom: 0;
-      border-radius: 8px 8px 0 0;
-      background: #eef3f6;
-      color: var(--muted);
-      box-shadow: none;
-      font-size: 14px;
-    }
-    .tab.active {
-      background: var(--panel);
-      color: var(--model);
-    }
     h2 {
       margin: 0 0 12px;
       font-size: 18px;
@@ -81,7 +60,7 @@
       border: 1px solid var(--line);
       border-radius: 8px;
       background: var(--panel);
-      color: var(--seoul);
+      color: var(--model);
       text-decoration: none;
       font-weight: 700;
       box-shadow: 0 8px 22px rgba(23, 32, 51, 0.05);
@@ -89,6 +68,10 @@
     a:hover {
       border-color: #9fb3c8;
       transform: translateY(-1px);
+    }
+    a:focus-visible {
+      outline: 3px solid rgba(20, 184, 166, 0.5);
+      outline-offset: 3px;
     }
     a span {
       display: block;
@@ -101,6 +84,53 @@
     .sejong a { color: var(--sejong); }
     .model a { color: var(--model); }
     .lab a { color: var(--lab); }
+    .lab nav {
+      grid-template-columns: minmax(0, 1fr);
+      max-width: 560px;
+    }
+    .lab .lab-cta {
+      position: relative;
+      min-height: 132px;
+      padding: 22px 24px;
+      border: 0;
+      overflow: hidden;
+      isolation: isolate;
+      background:
+        radial-gradient(circle at 88% 18%, rgba(249, 115, 22, 0.95), transparent 24%),
+        linear-gradient(135deg, var(--lab-deep) 0%, #0f766e 55%, var(--lab-hot) 100%);
+      color: #ffffff;
+      box-shadow: 0 18px 36px rgba(15, 23, 42, 0.22), 0 0 0 1px rgba(255, 255, 255, 0.2) inset;
+    }
+    .lab .lab-cta::after {
+      content: "OPEN";
+      position: absolute;
+      right: 20px;
+      bottom: 18px;
+      z-index: 0;
+      color: rgba(255, 255, 255, 0.14);
+      font-size: 42px;
+      line-height: 1;
+      font-weight: 900;
+      letter-spacing: 0;
+      pointer-events: none;
+    }
+    .lab .lab-cta:hover {
+      border-color: transparent;
+      transform: translateY(-2px);
+      box-shadow: 0 22px 46px rgba(15, 23, 42, 0.28), 0 0 0 2px rgba(255, 255, 255, 0.28) inset;
+    }
+    .lab .lab-cta:focus-visible {
+      outline: 4px solid rgba(249, 115, 22, 0.45);
+      outline-offset: 4px;
+    }
+    .lab .lab-cta span,
+    .lab .lab-cta {
+      z-index: 1;
+    }
+    .lab .lab-cta span {
+      max-width: 390px;
+      color: rgba(255, 255, 255, 0.9);
+    }
     .feature {
       display: grid;
       grid-template-columns: 1.1fr 0.9fr;
@@ -129,6 +159,7 @@
       main { padding: 34px 16px; }
       nav, .feature { grid-template-columns: 1fr; }
       a { min-height: auto; }
+      .lab .lab-cta::after { font-size: 34px; }
     }
   </style>
 </head>
@@ -137,17 +168,10 @@
     <h1>GCOO Mobility Visualizations</h1>
     <p class="lead">수집된 PM 데이터를 지도, 차트, 최적화 모델 관점에서 함께 볼 수 있는 시각화 허브입니다.</p>
 
-    <div class="tabs" aria-label="Visualization tabs">
-      <a class="tab active" href="./optimization_model.html">Optimization Model</a>
-      <a class="tab" href="./sejong_map.html">Sejong Geo</a>
-      <a class="tab" href="./sejong_charts_dashboard.html">Sejong Charts</a>
-      <a class="tab" href="./seoul_map.html">Seoul Legacy</a>
-    </div>
-
     <section class="model">
       <h2>최적화 모델 시각화</h2>
       <div class="feature">
-        <a href="./optimization_model.html">Optimization Model Tab 보기<span>Sejong TAGO 스냅샷을 500m grid의 공급량, 추정 수요, competition pressure, rebalancing 부담으로 변환해 모델과 최종 배치 결과를 보여줍니다.</span></a>
+        <a href="./optimization_model.html">Optimization Model 보기<span>Sejong TAGO 스냅샷을 500m grid의 공급량, 추정 수요, competition pressure, rebalancing 부담으로 변환해 모델과 최종 배치 결과를 보여줍니다.</span></a>
         <pre class="formula">Qᵢₛ(xᵢ) = min {
   Aᵢₛ · [1 - exp(-βxᵢ / (1 + θCᵢₛ))],
   Uxᵢ
@@ -158,23 +182,14 @@ maximize Eₛ[Σᵢ(pᵢ-v)Qᵢₛ(xᵢ) - Σᵢcᵢxᵢ - Σᵢrᵢ(xᵢ)]</pre
       <nav style="margin-top:12px;">
         <a href="./optimization_model_map.html">모델 지도 보기<span>Zone별 최적 배치량 x*, 기대 ride, zone별 profit을 지도에서 확인</span></a>
         <a href="./optimization_model_data.json">모델 데이터 JSON<span>최종 배치 결과, 파라미터, 생성된 산출물 경로</span></a>
-        <a href="../../Data_Model_Sheet.md">Model Sheet Markdown<span>변수, 제약식, 목적함수, Simulation 설계 설명 원문</span></a>
+        <a href="../../Data_Model_Sheet.md" target="_blank" rel="noopener">Model Sheet Markdown<span>변수, 제약식, 목적함수, Simulation 설계 설명 원문</span></a>
       </nav>
     </section>
 
     <section class="lab">
       <h2>에이전트 실험실</h2>
       <nav>
-        <a href="./hermes_lab.html">실험실 열기<span>자연어로 모델, 변수, 시각화를 바꾸고 상태 저장과 되돌리기를 실행</span></a>
-      </nav>
-    </section>
-
-    <section class="seoul">
-      <h2>서울시 따릉이 기반 시각화</h2>
-      <nav>
-        <a href="./seoul_map.html">서울 지도 보기<span>따릉이 대여소 위치, 거치 현황 히트맵, 행정동별 수요 지표</span></a>
-        <a href="./charts_dashboard.html">서울 차트 대시보드 보기<span>수집된 따릉이 기반 모델 입력, 수요, 배치 결과 차트</span></a>
-        <a href="./seoul_visualization_manifest.json">서울 Manifest JSON<span>입력 경로, 지도 지표, 따릉이 데이터 행 수 등</span></a>
+        <a class="lab-cta" href="./hermes_lab.html" aria-label="에이전트 실험실 열기">실험실 열기<span>자연어로 모델, 변수, 시각화를 바꾸고 상태 저장과 되돌리기를 실행</span></a>
       </nav>
     </section>
 
