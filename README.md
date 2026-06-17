@@ -85,7 +85,7 @@ x_i \ge 0
 목표는 하루 기대 profit을 최대화하는 것입니다.
 
 ```math
-\max_x \sum_i \left[(p_i-v)Q_i(x_i)-c_i x_i-r_i(x_i)\right]
+\max_x \sum_i \left[(p_i-v)Q_i(x_i)-r_i(x_i)\right]
 ```
 
 각 항은 다음 의미를 갖습니다.
@@ -96,10 +96,9 @@ x_i \ge 0
 | `p_i` | ride 1건당 평균 매출 |
 | `v` | ride 1건당 변동비 |
 | `Q_i(x_i)` | 배치량 `x_i`에서 실제로 잡을 수 있는 기대 ride 수 |
-| `c_i x_i` | PM을 배치해두는 데 드는 일 운영비 |
-| `r_i(x_i)` | 이용 후 흩어진 PM을 회수/재배치하는 기대 비용 |
+| `r_i(x_i)` | 이용 후 흩어진 PM을 회수/재배치하는 기대 비용. `log(1+Q_i(x_i))`로 묶음 이동 효과를 반영 |
 
-이 구조는 “ride revenue - operating cost - rebalancing cost”를 직접 모델링합니다.
+이 구조는 “ride revenue - variable cost - rebalancing cost”를 직접 모델링합니다. 재배치비는 `r_i(x_i)=ρL_i log(1+Q_i(x_i))`로 계산해 OD flow가 큰 zone에 비용이 선형으로 과적용되지 않게 합니다.
 
 ---
 
@@ -228,7 +227,7 @@ S_{i,t+1}=S_{i,t}-\text{served departures}_{i,t}+\text{served arrivals}_{i,t}
 
 이 section은 버튼을 눌렀을 때 로컬 visualization server의 `POST /api/parameter-search` endpoint를 호출합니다. 서버는 `λ`, `β`, `θ` grid 조합을 만들고, 각 조합마다 100개의 demand trial을 실행합니다. 현재 기본 grid는 `λ` 0.05 단위, `β` 0.005 단위, `θ` 0.05 단위이며, 총 28,675개 parameter 조합과 2,867,500개 case가 만들어집니다.
 
-Full-run은 허용됩니다. 다만 Python의 `threading`은 CPU-bound 계산에서 GIL 때문에 core를 충분히 쓰기 어렵기 때문에, 구현은 `ProcessPoolExecutor` 기반 worker pool을 사용합니다. 기본 worker 수는 `os.cpu_count() - 2`이며, 현재 12 CPU 환경에서는 cron scheduler용 2개 core를 남기고 10 worker가 parameter 조합을 나눠 계산합니다. 단일 worker 기준 100 case / 4초 benchmark라면 단순 추정 31.9시간이고, 10 worker 기준 이론 추정은 약 3.2시간입니다.
+Full-run은 허용됩니다. 다만 Python의 `threading`은 CPU-bound 계산에서 GIL 때문에 core를 충분히 쓰기 어렵기 때문에, 구현은 `ProcessPoolExecutor` 기반 worker pool을 사용합니다. 기본 worker 수는 `os.cpu_count() - 2`이며, 현재 12 CPU 환경에서는 cron scheduler용 2개 core를 남기고 10 worker가 parameter 조합을 나눠 계산합니다. Worker process는 OS nice `+10`으로 낮은 priority에서 실행해, CPU를 많이 쓰더라도 server, browser, editor 응답성이 먼저 확보되도록 합니다. 단일 worker 기준 100 case / 4초 benchmark라면 단순 추정 31.9시간이고, 10 worker 기준 이론 추정은 약 3.2시간입니다.
 
 OOM 방지를 위해 demand scenario는 worker 초기화 시 compact representation으로 한 번만 전달하고, calibration 중에는 case-level movement log를 저장하지 않습니다. 메모리에 유지하는 것은 demand scenario set, worker별 compact copy, 그리고 parameter 조합별 summary 결과입니다.
 
@@ -264,7 +263,6 @@ Full-run 완료 후 화면의 `이 최적값 반영하기` 버튼을 누르면 b
 | `U` | 6.0 rides/device/day | PM 1대가 하루 처리할 수 있는 최대 ride 수 |
 | `p_i` | 2,200 KRW | ride 1건 평균 매출 |
 | `v` | 300 KRW | ride 1건당 변동비 |
-| `c_i` | 2,500 KRW/day | PM 1대당 일 운영비 |
 | `ρ` | 900 KRW/km | 재배치 거리 1km당 비용 |
 | `κ` | 1.25 | zone capacity `K_i` 계산 multiplier |
 
@@ -671,7 +669,7 @@ grep -Eo 'https://[^ ]+\.trycloudflare\.com' logs/sejong_tago_cloudflared.log | 
 - TAGO snapshot은 실제 대여 시작/종료 event log가 아니므로, ride demand는 device movement interval에서 추정합니다.
 - 현재 dashboard는 외부 commercial MINLP solver를 호출하지 않고, model을 설명하고 결과를 시각화하기 위한 Python routine을 사용합니다.
 - Origin-Destination Pair 기반 하루 재고 simulation은 `x*`를 고정한 사후 검증입니다. `x_i`, `S_{i,t}`, `Q_{i,t}`를 동시에 최적화하는 full time-expanded nonlinear optimization은 아직 풀지 않습니다.
-- `p_i`, `v`, `c_i`, `ρ`, `U`, `β`, `θ`, `λ`는 baseline assumption이며 실제 GCOO 내부 정산/운영 데이터가 있으면 보정해야 합니다.
+- `p_i`, `v`, `ρ`, `U`, `β`, `θ`, `λ`는 baseline assumption이며 실제 GCOO 내부 정산/운영 데이터가 있으면 보정해야 합니다.
 - GPS noise, 수거/재배치 이동, 실제 이용 이동이 snapshot interval 안에서 섞일 수 있으므로 inferred ride는 proxy입니다.
 - Origin-Destination Pair simulation의 random demand는 snapshot에서 추정한 빈도와 회귀 smoothing을 기반으로 한 synthetic day입니다. 실제 결제/대여 event log가 있으면 시간대별 rate와 shortage 측정이 더 정확해집니다.
 - 현재 모델은 500m grid zone 단위이며, 실제 sidewalk-level parking constraints는 반영하지 않습니다.

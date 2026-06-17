@@ -196,7 +196,6 @@ Required parameters:
 | `per_minute_fee`                  | Per-minute ride fee                        |
 | `avg_scooter_speed_kmph`          | Assumed average e-scooter speed            |
 | `variable_cost_per_ride`          | Cost incurred per ride                     |
-| `base_fixed_cost_per_scooter_day` | Daily fixed operating cost per scooter     |
 | `u0_avg_rides_per_scooter_day`    | Baseline average rides per scooter per day |
 | `u_max_rides_per_scooter_day`     | Maximum feasible rides per scooter per day |
 
@@ -665,15 +664,7 @@ This is not directly observable, so it is configured as an assumption and tested
 
 ---
 
-## 12.2 Fixed Cost per Scooter per Day
-
-Each scooter incurs a fixed daily operating cost even if it receives no ride.
-
-Base cost:
-
-```text
-c_0 = base_fixed_cost_per_scooter_day
-```
+## 12.2 Administrative-Dong Imbalance Index
 
 Administrative-dong-specific imbalance index:
 
@@ -681,36 +672,17 @@ Administrative-dong-specific imbalance index:
 B_i = abs(mean_arrivals_i - mean_departures_i) / (mean_arrivals_i + mean_departures_i + 1)
 ```
 
-Dong-specific fixed cost:
-
-```text
-c_i = c_0 * (1 + mu * B_i)
-```
-
 Where:
 
-| Symbol | Meaning                      |
-| ------ | ---------------------------- |
-| `B_i`  | OD imbalance index           |
-| `mu`   | cost increase from imbalance |
-
-Baseline:
-
-```yaml
-mu: 0.5
-```
-
-Sensitivity:
-
-```yaml
-mu: [0.0, 0.5, 1.0]
-```
+| Symbol | Meaning            |
+| ------ | ------------------ |
+| `B_i`  | OD imbalance index |
 
 Interpretation:
 
 - If arrivals and departures are balanced, `B_i` is low.
 - If a dong is mostly an origin or mostly a destination, it may require more redistribution.
-- Higher imbalance increases fixed operating cost.
+- Imbalance is tracked as a diagnostic signal, while redistribution burden is handled through the rebalancing term.
 
 ---
 
@@ -719,7 +691,7 @@ Interpretation:
 Maximize expected daily operating profit:
 
 ```text
-Maximize Pi(x) = (1 / |S|) * sum_s sum_i [ (p_i - c_r) * Q_is(x_i) - c_i * x_i ]
+Maximize Pi(x) = (1 / |S|) * sum_s sum_i [ (p_i - c_r) * Q_is(x_i) - r_is(x_i) ]
 ```
 
 Where:
@@ -731,7 +703,7 @@ Where:
 | `p_i`       | revenue per ride in dong i   |
 | `c_r`       | variable cost per ride       |
 | `Q_is(x_i)` | expected rides               |
-| `c_i`       | daily fixed cost per scooter |
+| `r_is(x_i)` | expected rebalancing cost    |
 | `x_i`       | scooters placed              |
 
 ---
@@ -960,8 +932,6 @@ For each iteration `m`:
    - `theta`
    - `U`
    - `variable_cost_per_ride`
-   - `base_fixed_cost_per_scooter_day`
-   - `mu`
 3. Recompute `D_is`, `A_is`, `Q_is`, and costs.
 4. Evaluate profit for each placement plan:
    - observed placement
@@ -1015,8 +985,6 @@ Run one-at-a-time sensitivity analysis on the following parameters.
 | `U`                               |        6 |              4, 6, 8 |
 | `avg_scooter_speed_kmph`          |       12 |           10, 12, 15 |
 | `variable_cost_per_ride`          |   config | -20%, baseline, +20% |
-| `base_fixed_cost_per_scooter_day` |   config | -20%, baseline, +20% |
-| `mu`                              |      0.5 |        0.0, 0.5, 1.0 |
 | `F`                               | observed | -20%, observed, +20% |
 
 For each run, output:
@@ -1151,8 +1119,6 @@ revenue:
 
 cost:
   variable_cost_per_ride: 300
-  base_fixed_cost_per_scooter_day: 2500
-  mu_imbalance_cost: 0.5
 
 nonlinear_model:
   lambda_market_validation: 0.3
@@ -1282,7 +1248,6 @@ Selected dongs should be interpretable based on demand, competition, and cost.
 | `lambda`  | market validation effect |      0.3 |       0-0.5 |
 | `theta`   | competition pressure     |      1.0 |     0.5-2.0 |
 | `U`       | max rides/scooter/day    |        6 |         4-8 |
-| `mu`      | imbalance cost effect    |      0.5 |       0-1.0 |
 
 ### Table 3. Baseline Comparison
 

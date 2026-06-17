@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -64,8 +65,10 @@ def run(command: list[str], cwd: Path | None = None) -> subprocess.CompletedProc
     return subprocess.run(command, cwd=cwd, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False)
 
 
-def copy_tree(src: Path, dst: Path) -> None:
+def copy_tree(src: Path, dst: Path, overwrite: bool = False) -> None:
     if dst.exists():
+        if overwrite:
+            shutil.copytree(src, dst, dirs_exist_ok=True)
         return
     dst.parent.mkdir(parents=True, exist_ok=True)
     result = run(["cp", "-a", "--reflink=auto", str(src), str(dst)])
@@ -73,8 +76,8 @@ def copy_tree(src: Path, dst: Path) -> None:
         shutil.copytree(src, dst)
 
 
-def copy_file(src: Path, dst: Path) -> None:
-    if dst.exists():
+def copy_file(src: Path, dst: Path, overwrite: bool = False) -> None:
+    if dst.exists() and not overwrite:
         return
     dst.parent.mkdir(parents=True, exist_ok=True)
     result = run(["cp", "--reflink=auto", "-p", str(src), str(dst)])
@@ -86,8 +89,8 @@ def strip_embedded_agent_widget(path: Path) -> None:
     if not path.exists() or path.suffix.lower() != ".html":
         return
     text = path.read_text(encoding="utf-8")
-    cleaned = text.replace('  <script defer src="./hermes_widget.js"></script>\n', "")
-    cleaned = cleaned.replace('<script defer src="./hermes_widget.js"></script>\n', "")
+    cleaned = re.sub(r'  <script defer src="\./hermes_widget\.js(?:\?[^"]*)?"></script>\n', "", text)
+    cleaned = re.sub(r'<script defer src="\./hermes_widget\.js(?:\?[^"]*)?"></script>\n', "", cleaned)
     cleaned = cleaned.replace('href="./index.html"', 'href="../index.html" target="_top"')
     if cleaned != text:
         path.write_text(cleaned, encoding="utf-8")
@@ -140,26 +143,27 @@ def init_lab(force: bool = False, quick: bool = False) -> None:
     if force and LAB_ROOT.exists():
         shutil.rmtree(LAB_ROOT)
     LAB_ROOT.mkdir(parents=True, exist_ok=True)
+    refresh_existing = not quick
 
     for src_rel, dst_rel in DIRECTORY_CLONES:
-        copy_tree(REPO_ROOT / src_rel, LAB_ROOT / dst_rel)
+        copy_tree(REPO_ROOT / src_rel, LAB_ROOT / dst_rel, overwrite=refresh_existing)
 
     processed_dst = LAB_ROOT / "data" / "processed" / "sejong_tago"
     processed_dst.mkdir(parents=True, exist_ok=True)
     for filename in PROCESSED_FILES:
         src = REPO_ROOT / "data" / "processed" / "sejong_tago" / filename
         if src.exists():
-            copy_file(src, processed_dst / filename)
+            copy_file(src, processed_dst / filename, overwrite=refresh_existing)
 
     for filename in ROOT_FILES:
         src = REPO_ROOT / filename
         if src.exists():
-            copy_file(src, LAB_ROOT / filename)
+            copy_file(src, LAB_ROOT / filename, overwrite=refresh_existing)
 
     for src_rel, dst_rel in VISUALIZATION_FILES:
         src = REPO_ROOT / src_rel
         if src.exists():
-            copy_file(src, LAB_ROOT / dst_rel)
+            copy_file(src, LAB_ROOT / dst_rel, overwrite=refresh_existing)
             strip_embedded_agent_widget(LAB_ROOT / dst_rel)
 
     write_lab_readme()

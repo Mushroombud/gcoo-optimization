@@ -227,7 +227,7 @@ x_i \ge 0
 GBIKE의 하루 기대 profit을 최대화한다.
 
 ```math
-\max_x \sum_i \left[(p_i-v)Q_i(x_i)-c_i x_i-r_i(x_i)\right]
+\max_x \sum_i \left[(p_i-v)Q_i(x_i)-r_i(x_i)\right]
 ```
 
 각 항의 의미는 다음과 같다.
@@ -238,14 +238,11 @@ GBIKE의 하루 기대 profit을 최대화한다.
 | `p_i` | zone `i`에서 ride 1건이 만드는 평균 매출 |
 | `v` | ride 1건당 변동비 |
 | `Q_i(x_i)` | zone `i`에서 실제로 잡을 수 있는 기대 ride 수 |
-| `c_i x_i` | 배치한 PM 대수에 비례하는 일 운영비 |
 | `r_i(x_i)` | 이용 후 흩어진 PM을 회수/재배치하는 기대 비용 |
 
 `(p_i-v)Q_i(x_i)`는 운행으로 벌어들이는 기대 이익이다. `p_i`에서 `v`를 빼는 이유는 ride 1건이 발생할 때 매출만 생기는 것이 아니라 결제 수수료, 정비, 소모품, 고객지원 등 ride 수에 비례하는 비용도 같이 발생하기 때문이다.
 
-`-c_i x_i`는 ride가 발생하지 않아도 PM을 현장에 배치해두는 순간 발생하는 비용이다. 예를 들어 충전 관리, 보험/감가, 현장 관리, 민원 대응 등이 여기에 해당한다.
-
-`-r_i(x_i)`는 PM이 이용 후 다른 zone으로 흩어졌을 때 다음 운영 시작 전에 다시 회수하거나 재배치하는 비용이다. Origin-Destination Pair flow가 불균형한 zone일수록 이 값이 커질 수 있다.
+`-r_i(x_i)`는 PM이 이용 후 다른 zone으로 흩어졌을 때 다음 운영 시작 전에 다시 회수하거나 재배치하는 비용이다. 다만 여러 대를 한 번에 회수할 수 있는 묶음 이동 효과를 반영하기 위해 기대 ride 수는 `log(1+Q_i(x_i))`로 완만하게 보정한다.
 
 ---
 
@@ -440,7 +437,6 @@ x_i \in \mathbb{Z}_+
 | `U` | 6.0 rides/device/day | PM 1대가 하루 처리 가능한 최대 ride 수 |
 | `p_i` | 2,200 KRW | 현재 dashboard에서는 zone 공통 ride 1건 평균 매출 |
 | `v` | 300 KRW | ride 1건당 변동비 |
-| `c_i` | 2,500 KRW/day | PM 1대당 일 운영비 |
 | `ρ` | 900 KRW/km | 재배치 거리 1km당 비용 |
 | `κ` | 1.25 | zone capacity `K_i` 계산에 쓰는 multiplier |
 
@@ -460,15 +456,15 @@ x_i \in \mathbb{Z}_+
 | `A_i` | `D_i(1 + λ log(1+C_i)/log(1+C_max))` | 보정된 잠재수요 |
 | `K_i` | `ceil(κ * current total PM supply_i)` | zone별 최대 배치 가능량 |
 | `L_i` | clean Origin-Destination Pair flow 기반 expected rebalancing km | 이용 후 PM 회수/재배치 거리 proxy |
-| `r_i(x_i)` | `ρ * L_i * Q_i(x_i)` | 기대 재배치비 |
+| `r_i(x_i)` | `ρ * L_i * log(1 + Q_i(x_i))` | 묶음 이동 효과를 반영한 기대 재배치비 |
 
 현재 구현의 rebalancing cost는 다음 구조다.
 
 ```math
-r_i(x_i)=\rho L_i Q_i(x_i)
+r_i(x_i)=\rho L_i \log(1+Q_i(x_i))
 ```
 
-`L_i`는 `sejong_pm_od_flows.csv`에서 origin zone `i`에서 출발한 clean ride들의 평균 이동거리로부터 추정한다. 즉, 운영자 이동 의심 segment를 제거한 뒤 어떤 zone에서 출발한 PM이 이용 후 얼마나 흩어질 가능성이 있는지를 비용으로 반영한다.
+`L_i`는 `sejong_pm_od_flows.csv`에서 origin zone `i`에서 출발한 clean ride들의 평균 이동거리로부터 추정한다. 재배치비는 이 거리 proxy에 `log(1+Q_i(x_i))`를 곱해 계산하므로, OD flow가 큰 zone도 대수만큼 선형으로 비용이 늘지 않고 묶음 회수의 규모 효과를 반영한다.
 
 ---
 
@@ -483,7 +479,7 @@ r_i(x_i)=\rho L_i Q_i(x_i)
 여기서:
 
 ```math
-a_i = (p_i-v)u_i-c_i-\rho_i
+a_i = (p_i-v)u_i-\rho_i
 ```
 
 `a_i`는 zone `i`에 PM 1대를 추가했을 때의 고정된 기대 순이익이다.
@@ -539,7 +535,6 @@ scenario별 profit은 다음처럼 계산한다.
 ```math
 Profit_s(x^*)
 =\sum_i (p_i-v)Q_{is}(x_i^*)
--\sum_i c_i x_i^*
 -\sum_i r_{is}(x_i^*)
 ```
 
@@ -549,7 +544,7 @@ Profit_s(x^*)
 
 ### cost shock
 
-재배치비가 평소보다 비싸지거나 싸지는 효과다. 예를 들어 회수 동선이 길어지거나 인력/차량 비용이 올라가면 같은 ride 수에서도 rebalancing cost가 커진다.
+재배치비가 평소보다 비싸지거나 싸지는 효과다. 예를 들어 회수 동선이 길어지거나 인력/차량 비용이 올라가면 log 보정된 이동량 기준의 rebalancing cost가 커진다.
 
 ### P10 / P50 / P90
 
@@ -752,7 +747,7 @@ unmet_{i,t}
 
 `λ`, `β`, `θ`는 non-linear demand capture 구조의 핵심 상수다. 기존 dashboard baseline은 `λ=0.30`, `β=0.08`, `θ=1.00`을 사용하지만, 이 값들은 외부 운영 데이터로 직접 추정된 값이 아니므로 arbitrary해 보일 수 있다.
 
-이를 보완하기 위해 `optimization_model.html` 하단에 **상수 Calibration Simulation** section을 추가했다. 이 section은 버튼을 누를 때만 실행되며, local visualization server의 `POST /api/parameter-search` endpoint가 Python에서 순차 계산한다.
+이를 보완하기 위해 `optimization_model.html` 하단에 **상수 Calibration Simulation** section을 추가했다. 이 section은 버튼을 누를 때만 local visualization server의 `POST /api/parameter-search` endpoint를 호출한다. Full-grid run은 허용하되, CPU-bound Python 계산에서 실제 core를 쓰기 위해 `ProcessPoolExecutor` 기반 worker pool로 parameter 조합을 병렬 평가한다.
 
 ### 11.1 목적함수
 
@@ -766,7 +761,11 @@ parameter calibration의 목적은 profit을 다시 최대화하는 것이 아�
 
 ### 11.2 실행 방식
 
-`λ`, `β`, `θ`를 작은 step 단위 grid로 열거한다. 현재 기본 grid는 `λ` 0.05 단위, `β` 0.005 단위, `θ` 0.05 단위다. 그 결과 28,675개 parameter 조합이 만들어지고, 각 조합마다 100개 demand trial을 실행하므로 총 2,867,500개 case를 평가한다.
+`λ`, `β`, `θ`를 작은 step 단위 grid로 열거한다. 현재 기본 grid는 `λ` 0.05 단위, `β` 0.005 단위, `θ` 0.05 단위다. 그 결과 28,675개 parameter 조합이 만들어지고, 각 조합마다 100개 demand trial을 실행하면 총 2,867,500개 case가 된다.
+
+현재 local benchmark가 100 case / 4초라면 2,867,500개 case는 단일 worker 기준 약 114,700초, 즉 약 31.9시간이 필요하다. 현재 12 CPU 환경에서는 cron scheduler가 사용할 2개 core를 남기고 10 worker를 사용하므로, 단순 병렬 추정은 약 3.2시간이다. 실제 runtime은 process spawn, worker별 pandas copy, OS scheduling, candidate별 계산 편차 때문에 달라질 수 있다.
+
+Python `threading`은 GIL 때문에 CPU-bound loop를 여러 core에 잘 분산하지 못한다. 따라서 구현상으로는 thread가 아니라 process worker pool을 사용한다. dashboard에서는 multi-core full-run으로 표현하며, 내부적으로는 worker process가 parameter candidate를 나눠 처리한다.
 
 | Parameter | Search range | Step | Grid count | 의미 |
 | --- | ---: | ---: | ---: | --- |
@@ -790,20 +789,34 @@ parameter calibration의 목적은 profit을 다시 최대화하는 것이 아�
 
 ### 11.3 Frontend/Backend Control
 
-Frontend의 `시뮬레이션 시작하기` 버튼을 누르면 loading indicator가 켜지고 버튼이 disabled 된다. 완료 전까지 같은 page에서 추가 request를 보낼 수 없다.
+Frontend의 `Full-run 시뮬레이션 시작하기` 버튼을 누르면 loading indicator가 켜지고 버튼이 disabled 된다. 완료 전까지 같은 page에서 추가 request를 보낼 수 없다. 같은 화면은 `GET /api/parameter-search-progress`를 1초 간격으로 polling해서 실제 완료된 parameter 조합 수와 case 수를 읽고, `completed_cases / elapsed_seconds` 기준의 실제 처리속도로 ETA를 갱신한다.
 
-Backend도 `threading.Lock`으로 동일 endpoint의 동시 실행을 막는다. 이미 실행 중인 request가 있으면 `409`를 반환한다. 연산은 2,867,500개 case를 한 번에 메모리에 쌓지 않고 parameter 조합과 demand trial을 순차 처리하며, 결과만 작은 JSON list로 유지한다. 실행 결과는 화면에 표시되고 `outputs/visualizations/parameter_search_results.json`에도 저장된다.
+Backend도 `threading.Lock`으로 동일 endpoint의 동시 실행을 막는다. 이미 실행 중인 request가 있으면 `409`를 반환한다. Full-run은 `os.cpu_count() - 2` worker로 실행되며, 요청에서 `max_workers`를 넘기면 해당 값을 상한 내에서 사용할 수 있다.
 
-Full-grid calibration은 연산 시간이 길 수 있으므로 dashboard 생성 시 자동 실행하지 않는다. 사용자가 `시뮬레이션 시작하기` 버튼을 눌렀을 때 실행하고, 완료 후 다음 항목을 `parameter_search_results.json`에 저장한다.
+OOM 방지를 위해 2,867,500개 case를 한 번에 메모리에 쌓지 않는다. 100개 Origin-Destination Pair demand scenario는 compact representation으로 변환한 뒤 worker 초기화 시 전달하고, 각 worker는 parameter 조합을 맡아 summary만 반환한다. case-level movement log는 calibration 중 저장하지 않는다. 완료 후 다음 항목을 `parameter_search_results.json`에 저장한다.
+
+Full-run 완료 후 `이 최적값 반영하기` 버튼을 누르면 best `λ/β/θ`가 `optimization_model_constants.json`에 승인값으로 저장된다. Frontend에는 `(5분 내로 재계산 시 반영됩니다)` 문구를 표시한다. 다음 collector 또는 visualization 재계산 때 `visualize_optimization_model.render()`는 이 승인파일을 읽고, `λ`는 `build_zone_model()`, `β/θ`는 `optimize_dashboard_solution()`의 실제 입력 상수로 사용한다.
 
 | 저장 항목 | 의미 |
 | --- | --- |
 | `parameter_combination_count` | 평가한 λ/β/θ grid 조합 수 |
 | `trials_per_parameter_combination` | 각 parameter 조합별 demand simulation 반복 횟수 |
 | `case_count` | 전체 평가 case 수 |
+| `estimated_runtime_seconds` | 현재 benchmark 기준 예상 실행 시간 |
+| `elapsed_seconds` | 실제 full-run 완료까지 걸린 시간 |
+| `actual_cases_per_second` | 실제 완료 case 수와 경과 시간으로 계산한 처리속도 |
+| `worker_count` | calibration에 사용한 worker process 수 |
+| `reserved_cpu_cores` | cron scheduler 등을 위해 남긴 CPU core 수 |
 | `baseline_score` | 기존 `λ=0.30`, `β=0.08`, `θ=1.00` 기준 평균 unmet rides |
 | `best` | 평균 unmet rides가 가장 낮은 parameter 조합 |
 | `top_results` | 상위 10개 parameter 조합 |
+
+| 승인 저장 항목 | 의미 |
+| --- | --- |
+| `optimization_model_constants.json.lambda_market` | 다음 재계산에서 사용할 승인 `λ` |
+| `optimization_model_constants.json.beta_capture` | 다음 재계산에서 사용할 승인 `β` |
+| `optimization_model_constants.json.theta_competition` | 다음 재계산에서 사용할 승인 `θ` |
+| `optimization_model_constants.json.best_summary` | 승인 당시 best candidate의 핵심 score audit |
 
 이 calibration layer는 “현재 baseline parameter가 틀렸다”는 최종 결론을 자동으로 내리는 장치가 아니다. 기존 상수값을 고정 assumption으로 두지 않고, unmet ride 기준으로 재검증할 수 있게 하는 장치다.
 
@@ -815,19 +828,18 @@ Full-grid calibration은 연산 시간이 길 수 있으므로 dashboard 생성 
 
 | 항목 | 값 |
 | --- | ---: |
-| dashboard latest timestamp | 2026-06-18T03:05:10+0900 |
+| dashboard latest timestamp | 2026-06-18T04:25:03+0900 |
 | model zones | 356 |
 | GBIKE devices in snapshot | 2,823 |
 | ALPACA devices in snapshot | 1,368 |
 | optimization fleet `F` | 2,800 |
 | allocated devices | 2,800 |
-| active zones | 241 |
-| expected rides | 3,695.9 |
-| expected revenue | 8,131,077 KRW |
-| expected variable cost | 1,108,783 KRW |
-| expected fixed cost | 7,000,000 KRW |
-| expected rebalancing cost | 2,992,038 KRW |
-| expected profit / Objective value | -2,969,744 KRW |
+| active zones | 108 |
+| expected rides | 13,263.6 |
+| expected revenue | 29,179,830 KRW |
+| expected variable cost | 3,979,068 KRW |
+| expected rebalancing cost | 377,556 KRW |
+| expected profit / Objective value | 24,823,206 KRW |
 
 Origin-Destination Pair 기반 하루 재고 simulation의 현재 결과는 다음과 같다.
 

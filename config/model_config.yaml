@@ -19,8 +19,6 @@ revenue:
 
 cost:
   variable_cost_per_ride_krw: 300
-  base_fixed_cost_per_scooter_day_krw: 2500
-  mu_imbalance_cost: 0.5
   rebalancing_krw_per_scooter_km: 900
   rebalancing_fallback_distance_km: 2.0
 

@@ -227,7 +227,7 @@ x_i \ge 0
 GBIKE의 하루 기대 profit을 최대화한다.
 
 ```math
-\max_x \sum_i \left[(p_i-v)Q_i(x_i)-c_i x_i-r_i(x_i)\right]
+\max_x \sum_i \left[(p_i-v)Q_i(x_i)-r_i(x_i)\right]
 ```
 
 각 항의 의미는 다음과 같다.
@@ -238,14 +238,11 @@ GBIKE의 하루 기대 profit을 최대화한다.
 | `p_i` | zone `i`에서 ride 1건이 만드는 평균 매출 |
 | `v` | ride 1건당 변동비 |
 | `Q_i(x_i)` | zone `i`에서 실제로 잡을 수 있는 기대 ride 수 |
-| `c_i x_i` | 배치한 PM 대수에 비례하는 일 운영비 |
 | `r_i(x_i)` | 이용 후 흩어진 PM을 회수/재배치하는 기대 비용 |
 
 `(p_i-v)Q_i(x_i)`는 운행으로 벌어들이는 기대 이익이다. `p_i`에서 `v`를 빼는 이유는 ride 1건이 발생할 때 매출만 생기는 것이 아니라 결제 수수료, 정비, 소모품, 고객지원 등 ride 수에 비례하는 비용도 같이 발생하기 때문이다.
 
-`-c_i x_i`는 ride가 발생하지 않아도 PM을 현장에 배치해두는 순간 발생하는 비용이다. 예를 들어 충전 관리, 보험/감가, 현장 관리, 민원 대응 등이 여기에 해당한다.
-
-`-r_i(x_i)`는 PM이 이용 후 다른 zone으로 흩어졌을 때 다음 운영 시작 전에 다시 회수하거나 재배치하는 비용이다. Origin-Destination Pair flow가 불균형한 zone일수록 이 값이 커질 수 있다.
+`-r_i(x_i)`는 PM이 이용 후 다른 zone으로 흩어졌을 때 다음 운영 시작 전에 다시 회수하거나 재배치하는 비용이다. 다만 여러 대를 한 번에 회수할 수 있는 묶음 이동 효과를 반영하기 위해 기대 ride 수는 `log(1+Q_i(x_i))`로 완만하게 보정한다.
 
 ---
 
@@ -440,7 +437,6 @@ x_i \in \mathbb{Z}_+
 | `U` | 6.0 rides/device/day | PM 1대가 하루 처리 가능한 최대 ride 수 |
 | `p_i` | 2,200 KRW | 현재 dashboard에서는 zone 공통 ride 1건 평균 매출 |
 | `v` | 300 KRW | ride 1건당 변동비 |
-| `c_i` | 2,500 KRW/day | PM 1대당 일 운영비 |
 | `ρ` | 900 KRW/km | 재배치 거리 1km당 비용 |
 | `κ` | 1.25 | zone capacity `K_i` 계산에 쓰는 multiplier |
 
@@ -460,15 +456,15 @@ x_i \in \mathbb{Z}_+
 | `A_i` | `D_i(1 + λ log(1+C_i)/log(1+C_max))` | 보정된 잠재수요 |
 | `K_i` | `ceil(κ * current total PM supply_i)` | zone별 최대 배치 가능량 |
 | `L_i` | clean Origin-Destination Pair flow 기반 expected rebalancing km | 이용 후 PM 회수/재배치 거리 proxy |
-| `r_i(x_i)` | `ρ * L_i * Q_i(x_i)` | 기대 재배치비 |
+| `r_i(x_i)` | `ρ * L_i * log(1 + Q_i(x_i))` | 묶음 이동 효과를 반영한 기대 재배치비 |
 
 현재 구현의 rebalancing cost는 다음 구조다.
 
 ```math
-r_i(x_i)=\rho L_i Q_i(x_i)
+r_i(x_i)=\rho L_i \log(1+Q_i(x_i))
 ```
 
-`L_i`는 `sejong_pm_od_flows.csv`에서 origin zone `i`에서 출발한 clean ride들의 평균 이동거리로부터 추정한다. 즉, 운영자 이동 의심 segment를 제거한 뒤 어떤 zone에서 출발한 PM이 이용 후 얼마나 흩어질 가능성이 있는지를 비용으로 반영한다.
+`L_i`는 `sejong_pm_od_flows.csv`에서 origin zone `i`에서 출발한 clean ride들의 평균 이동거리로부터 추정한다. 재배치비는 이 거리 proxy에 `log(1+Q_i(x_i))`를 곱해 계산하므로, OD flow가 큰 zone도 대수만큼 선형으로 비용이 늘지 않고 묶음 회수의 규모 효과를 반영한다.
 
 ---
 
@@ -483,7 +479,7 @@ r_i(x_i)=\rho L_i Q_i(x_i)
 여기서:
 
 ```math
-a_i = (p_i-v)u_i-c_i-\rho_i
+a_i = (p_i-v)u_i-\rho_i
 ```
 
 `a_i`는 zone `i`에 PM 1대를 추가했을 때의 고정된 기대 순이익이다.
@@ -539,7 +535,6 @@ scenario별 profit은 다음처럼 계산한다.
 ```math
 Profit_s(x^*)
 =\sum_i (p_i-v)Q_{is}(x_i^*)
--\sum_i c_i x_i^*
 -\sum_i r_{is}(x_i^*)
 ```
 
@@ -549,7 +544,7 @@ Profit_s(x^*)
 
 ### cost shock
 
-재배치비가 평소보다 비싸지거나 싸지는 효과다. 예를 들어 회수 동선이 길어지거나 인력/차량 비용이 올라가면 같은 ride 수에서도 rebalancing cost가 커진다.
+재배치비가 평소보다 비싸지거나 싸지는 효과다. 예를 들어 회수 동선이 길어지거나 인력/차량 비용이 올라가면 log 보정된 이동량 기준의 rebalancing cost가 커진다.
 
 ### P10 / P50 / P90
 
@@ -796,7 +791,7 @@ Python `threading`은 GIL 때문에 CPU-bound loop를 여러 core에 잘 분산�
 
 Frontend의 `Full-run 시뮬레이션 시작하기` 버튼을 누르면 loading indicator가 켜지고 버튼이 disabled 된다. 완료 전까지 같은 page에서 추가 request를 보낼 수 없다. 같은 화면은 `GET /api/parameter-search-progress`를 1초 간격으로 polling해서 실제 완료된 parameter 조합 수와 case 수를 읽고, `completed_cases / elapsed_seconds` 기준의 실제 처리속도로 ETA를 갱신한다.
 
-Backend도 `threading.Lock`으로 동일 endpoint의 동시 실행을 막는다. 이미 실행 중인 request가 있으면 `409`를 반환한다. Full-run은 `os.cpu_count() - 2` worker로 실행되며, 요청에서 `max_workers`를 넘기면 해당 값을 상한 내에서 사용할 수 있다.
+Backend도 `threading.Lock`으로 동일 endpoint의 동시 실행을 막는다. 이미 실행 중인 request가 있으면 `409`를 반환한다. Full-run은 `os.cpu_count() - 2` worker로 실행되며, 요청에서 `max_workers`를 넘기면 해당 값을 상한 내에서 사용할 수 있다. Worker process는 OS nice `+10`으로 낮은 priority에서 실행해, CPU-bound full-run 중에도 server, browser, editor 응답성이 먼저 확보되도록 한다.
 
 OOM 방지를 위해 2,867,500개 case를 한 번에 메모리에 쌓지 않는다. 100개 Origin-Destination Pair demand scenario는 compact representation으로 변환한 뒤 worker 초기화 시 전달하고, 각 worker는 parameter 조합을 맡아 summary만 반환한다. case-level movement log는 calibration 중 저장하지 않는다. 완료 후 다음 항목을 `parameter_search_results.json`에 저장한다.
 
@@ -833,19 +828,18 @@ Full-run 완료 후 `이 최적값 반영하기` 버튼을 누르면 best `λ/β
 
 | 항목 | 값 |
 | --- | ---: |
-| dashboard latest timestamp | 2026-06-18T03:05:10+0900 |
+| dashboard latest timestamp | 2026-06-18T04:25:03+0900 |
 | model zones | 356 |
 | GBIKE devices in snapshot | 2,823 |
 | ALPACA devices in snapshot | 1,368 |
 | optimization fleet `F` | 2,800 |
 | allocated devices | 2,800 |
-| active zones | 241 |
-| expected rides | 3,695.9 |
-| expected revenue | 8,131,077 KRW |
-| expected variable cost | 1,108,783 KRW |
-| expected fixed cost | 7,000,000 KRW |
-| expected rebalancing cost | 2,992,038 KRW |
-| expected profit / Objective value | -2,969,744 KRW |
+| active zones | 108 |
+| expected rides | 13,263.6 |
+| expected revenue | 29,179,830 KRW |
+| expected variable cost | 3,979,068 KRW |
+| expected rebalancing cost | 377,556 KRW |
+| expected profit / Objective value | 24,823,206 KRW |
 
 Origin-Destination Pair 기반 하루 재고 simulation의 현재 결과는 다음과 같다.
 

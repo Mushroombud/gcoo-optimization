@@ -285,7 +285,7 @@
 
 .hermes-save-actions {
   display: grid;
-  grid-template-columns: 1fr 1fr auto;
+  grid-template-columns: 1fr 1fr 1fr auto;
   gap: 8px;
   align-items: center;
 }
@@ -311,6 +311,12 @@
   color: #fff;
 }
 
+.hermes-save-button.active {
+  border-color: #9cc9c3;
+  background: #ecfdf5;
+  color: var(--hermes-green);
+}
+
 .hermes-save-button:disabled,
 .hermes-icon-button:disabled {
   opacity: 0.48;
@@ -328,9 +334,13 @@
   position: relative;
   max-height: 210px;
   overflow: auto;
-  display: grid;
+  display: none;
   gap: 7px;
   padding-left: 10px;
+}
+
+.hermes-save-timeline.open {
+  display: grid;
 }
 
 .hermes-save-timeline::before {
@@ -451,6 +461,72 @@
 
 .hermes-message.rendered {
   white-space: normal;
+}
+
+.hermes-message.working {
+  color: #334155;
+  background: #ffffff;
+}
+
+.hermes-working-indicator {
+  min-height: 22px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  white-space: nowrap;
+}
+
+.hermes-working-ring {
+  width: 16px;
+  height: 16px;
+  border: 2px solid #cbd5e1;
+  border-top-color: var(--hermes-green);
+  border-radius: 50%;
+  animation: hermes-working-spin 820ms linear infinite;
+}
+
+.hermes-working-copy {
+  font-weight: 750;
+}
+
+.hermes-working-dots {
+  display: inline-flex;
+  gap: 3px;
+  align-items: center;
+}
+
+.hermes-working-dots span {
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--hermes-green);
+  animation: hermes-working-dot 1050ms ease-in-out infinite;
+}
+
+.hermes-working-dots span:nth-child(2) {
+  animation-delay: 140ms;
+}
+
+.hermes-working-dots span:nth-child(3) {
+  animation-delay: 280ms;
+}
+
+@keyframes hermes-working-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes hermes-working-dot {
+  0%, 80%, 100% {
+    opacity: 0.32;
+    transform: translateY(0);
+  }
+
+  40% {
+    opacity: 1;
+    transform: translateY(-3px);
+  }
 }
 
 .hermes-message.rendered > :first-child {

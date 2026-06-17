@@ -451,14 +451,9 @@ def build_model_inputs(
         (model["mean_arrivals"] - model["mean_departures"]).abs()
         / (model["mean_arrivals"] + model["mean_departures"] + 1)
     )
-    base_fixed_cost_krw = cost_cfg["base_fixed_cost_per_scooter_day_krw"]
-    model["fixed_cost_per_scooter_day_krw"] = base_fixed_cost_krw * (
-        1 + cost_cfg["mu_imbalance_cost"] * model["B_i"]
-    )
     return model[[
         "dong_id",
         "expected_revenue_per_ride_krw",
-        "fixed_cost_per_scooter_day_krw",
         "K_i",
         "x_obs_i",
         "B_i",
@@ -583,7 +578,6 @@ def optimize_allocation(
                 profit_sum_krw += (
                     row["expected_revenue_per_ride_krw"] - variable_cost_per_ride_krw
                 ) * q_is
-                profit_sum_krw -= row["fixed_cost_per_scooter_day_krw"] * k
                 used_sum += min(float(k), q_is)
             current_profit_krw = profit_sum_krw / max(len(scenarios), 1)
             operating_profit_krw_by_k[dong_id][k] = current_profit_krw
@@ -653,7 +647,7 @@ def optimize_allocation(
         for dong_id, count in allocation.items()
     )
     rebalancing_km = sum(
-        used_scooters_by_k[dong_id].get(count, 0.0)
+        math.log1p(max(0.0, used_scooters_by_k[dong_id].get(count, 0.0)))
         * return_distance_by_origin.get(dong_id, 0.0)
         for dong_id, count in allocation.items()
     )

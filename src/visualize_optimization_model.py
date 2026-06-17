@@ -4,6 +4,7 @@ import html
 import json
 import math
 import gc
+import heapq
 import multiprocessing
 import os
 import time
@@ -31,7 +32,6 @@ THETA_COMPETITION = 1.00
 U_MAX_RIDES = 6.0
 REVENUE_PER_RIDE_KRW = 2200.0
 VARIABLE_COST_KRW = 300.0
-FIXED_COST_PER_DEVICE_KRW = 2500.0
 REBALANCING_KRW_PER_KM = 900.0
 CAPACITY_MULTIPLIER = 1.25
 OPTIMIZATION_FLEET = 2800
@@ -56,6 +56,7 @@ PARAMETER_SEARCH_TOP_K = 10
 PARAMETER_SEARCH_RESERVED_CPU_CORES = 2
 PARAMETER_SEARCH_CHUNK_SIZE = 8
 PARAMETER_SEARCH_OBSERVED_SECONDS_PER_CASE = 0.04
+PARAMETER_SEARCH_WORKER_NICE = 10
 APPROVED_MODEL_PARAMETERS_FILE = "optimization_model_constants.json"
 SEJONG_GRID_LAT_STEP = 0.0044915558749550845
 SEJONG_GRID_LON_STEP = 0.005587124211191894
@@ -166,6 +167,10 @@ def demand_capture(
     return min(adjusted_demand * accessibility, U_MAX_RIDES * x_value)
 
 
+def rebalancing_load_units(rides: float) -> float:
+    return math.log1p(max(0.0, float(rides)))
+
+
 def zone_profit(
     adjusted_demand: float,
     x_value: int,
@@ -176,9 +181,8 @@ def zone_profit(
 ) -> float:
     rides = demand_capture(adjusted_demand, float(x_value), competitor, beta_capture, theta_competition)
     ride_margin = (REVENUE_PER_RIDE_KRW - VARIABLE_COST_KRW) * rides
-    fixed_cost = FIXED_COST_PER_DEVICE_KRW * x_value
-    rebalance_cost = REBALANCING_KRW_PER_KM * rebalance_km * rides
-    return ride_margin - fixed_cost - rebalance_cost
+    rebalance_cost = REBALANCING_KRW_PER_KM * rebalance_km * rebalancing_load_units(rides)
+    return ride_margin - rebalance_cost
 
 
 def build_zone_model(processed_dir: Path, lambda_market: float = LAMBDA_MARKET) -> tuple[pd.DataFrame, dict[str, Any]]:
@@ -324,37 +328,45 @@ def optimize_dashboard_solution(
     rows = model.copy()
     rows["x_star"] = 0
 
-    candidates: list[dict[str, Any]] = []
-    for row in rows.itertuples():
-        previous_profit = 0.0
-        for k in range(1, int(row.K_i) + 1):
-            current_profit = zone_profit(
+    zone_lookup = {str(row.zone_id): row for row in rows.itertuples()}
+    allocation = {zone_id: 0 for zone_id in rows["zone_id"].astype(str)}
+    heap: list[tuple[float, str, int, float]] = []
+
+    for zone_id, row in zone_lookup.items():
+        if int(row.K_i) <= 0:
+            continue
+        current_profit = zone_profit(
+            row.A_i,
+            1,
+            row.alpaca_competitor,
+            row.expected_rebalance_km,
+            beta_capture,
+            theta_competition,
+        )
+        heapq.heappush(heap, (-current_profit, zone_id, 1, current_profit))
+
+    selected = 0
+    while heap and selected < fleet_size:
+        neg_delta_profit, zone_id, k, current_profit = heapq.heappop(heap)
+        if allocation[zone_id] != k - 1:
+            continue
+
+        allocation[zone_id] = k
+        selected += 1
+
+        row = zone_lookup[zone_id]
+        next_k = k + 1
+        if next_k <= int(row.K_i):
+            next_profit = zone_profit(
                 row.A_i,
-                k,
+                next_k,
                 row.alpaca_competitor,
                 row.expected_rebalance_km,
                 beta_capture,
                 theta_competition,
             )
-            candidates.append(
-                {
-                    "zone_id": row.zone_id,
-                    "k": k,
-                    "delta_profit": current_profit - previous_profit,
-                }
-            )
-            previous_profit = current_profit
-    candidates.sort(key=lambda item: item["delta_profit"], reverse=True)
-
-    allocation = {zone_id: 0 for zone_id in rows["zone_id"].astype(str)}
-    selected = 0
-    for item in candidates:
-        if selected >= fleet_size:
-            break
-        zone_id = str(item["zone_id"])
-        if allocation[zone_id] == int(item["k"]) - 1:
-            allocation[zone_id] += 1
-            selected += 1
+            next_delta_profit = next_profit - current_profit
+            heapq.heappush(heap, (-next_delta_profit, zone_id, next_k, next_profit))
 
     rows["x_star"] = rows["zone_id"].map(allocation).fillna(0).astype(int)
     rows["Q_i_xstar"] = [
@@ -363,12 +375,15 @@ def optimize_dashboard_solution(
     ]
     rows["ride_revenue_krw"] = REVENUE_PER_RIDE_KRW * rows["Q_i_xstar"]
     rows["variable_cost_krw"] = VARIABLE_COST_KRW * rows["Q_i_xstar"]
-    rows["fixed_cost_krw"] = FIXED_COST_PER_DEVICE_KRW * rows["x_star"]
-    rows["rebalancing_cost_krw"] = REBALANCING_KRW_PER_KM * rows["expected_rebalance_km"] * rows["Q_i_xstar"]
+    rows["rebalancing_load_units"] = np.log1p(rows["Q_i_xstar"].clip(lower=0.0))
+    rows["rebalancing_cost_krw"] = (
+        REBALANCING_KRW_PER_KM
+        * rows["expected_rebalance_km"]
+        * rows["rebalancing_load_units"]
+    )
     rows["profit_i_krw"] = (
         rows["ride_revenue_krw"]
         - rows["variable_cost_krw"]
-        - rows["fixed_cost_krw"]
         - rows["rebalancing_cost_krw"]
     )
     rows["utilization_rides_per_device"] = 0.0
@@ -384,8 +399,10 @@ def optimize_dashboard_solution(
         "expected_rides": float(rows["Q_i_xstar"].sum()),
         "expected_revenue_krw": float(rows["ride_revenue_krw"].sum()),
         "expected_variable_cost_krw": float(rows["variable_cost_krw"].sum()),
-        "expected_fixed_cost_krw": float(rows["fixed_cost_krw"].sum()),
         "expected_rebalancing_cost_krw": float(rows["rebalancing_cost_krw"].sum()),
+        "expected_total_cost_krw": float(
+            rows["variable_cost_krw"].sum() + rows["rebalancing_cost_krw"].sum()
+        ),
         "expected_profit_krw": float(rows["profit_i_krw"].sum()),
         "binding_fleet": bool(int(rows["x_star"].sum()) == int(fleet_size)),
     }
@@ -418,7 +435,6 @@ def svg_cost_revenue(rows: pd.DataFrame) -> str:
     labels = [
         ("Ride revenue 운행매출", float(rows["ride_revenue_krw"].sum()), "#0f766e"),
         ("Variable cost 변동비", -float(rows["variable_cost_krw"].sum()), "#b45309"),
-        ("Fixed cost 고정비", -float(rows["fixed_cost_krw"].sum()), "#be123c"),
         ("Rebalancing cost 재배치비", -float(rows["rebalancing_cost_krw"].sum()), "#2563eb"),
         ("Net profit 순이익", float(rows["profit_i_krw"].sum()), "#172033"),
     ]
@@ -555,7 +571,6 @@ def simulation_summary(rows: pd.DataFrame) -> dict[str, Any]:
             (
                 active["ride_revenue_krw"] * demand_multiplier
                 - active["variable_cost_krw"] * demand_multiplier
-                - active["fixed_cost_krw"]
                 - active["rebalancing_cost_krw"] * cost_multiplier
             ).sum()
         )
@@ -648,7 +663,7 @@ def simulation_panel(rows: pd.DataFrame) -> str:
         </div>
         <div class="sim-card">
           <b>cost shock</b>
-          <span>재배치비가 평소보다 비싸지거나 싸지는 효과입니다. 예를 들어 회수 동선이 길어지거나 인력/차량 비용이 올라가면 같은 ride 수에서도 rebalancing cost가 커집니다.</span>
+          <span>재배치비가 평소보다 비싸지거나 싸지는 효과입니다. 예를 들어 회수 동선이 길어지거나 인력/차량 비용이 올라가면 log 보정된 이동량 기준의 rebalancing cost가 커집니다.</span>
         </div>
         <div class="sim-card">
           <b>P10 / P50 / P90</b>
@@ -1539,6 +1554,11 @@ def init_parameter_search_worker(
     demand_scenarios: list[CompactDemandScenario],
 ) -> None:
     global _PARAMETER_WORKER_BASE_MODEL, _PARAMETER_WORKER_DEMAND_SCENARIOS
+    if PARAMETER_SEARCH_WORKER_NICE > 0:
+        try:
+            os.nice(PARAMETER_SEARCH_WORKER_NICE)
+        except OSError:
+            pass
     _PARAMETER_WORKER_BASE_MODEL = base_model
     _PARAMETER_WORKER_DEMAND_SCENARIOS = demand_scenarios
 
@@ -2601,7 +2621,6 @@ def static_parameter_table(
         (r"\(U\)", fmt_float(U_MAX_RIDES, 1), "PM 1대가 하루 처리 가능한 최대 ride 수"),
         (r"\(p_i\)", f"{fmt_int(REVENUE_PER_RIDE_KRW)} KRW", "현재 dashboard에서는 zone 공통 ride 1건 평균 매출로 둠"),
         (r"\(v\)", f"{fmt_int(VARIABLE_COST_KRW)} KRW", "ride 1건당 변동비"),
-        (r"\(c_i\)", f"{fmt_int(FIXED_COST_PER_DEVICE_KRW)} KRW/day", "PM 1대당 일 운영비"),
         (r"\(\rho\)", f"{fmt_int(REBALANCING_KRW_PER_KM)} KRW/km", "재배치 거리 1km당 비용"),
         (r"\(\kappa\)", fmt_float(CAPACITY_MULTIPLIER, 2), r"\(K_i\) 계산에 쓰는 zone capacity multiplier"),
     ]
@@ -2624,7 +2643,7 @@ def data_parameter_table() -> str:
         ),
         (r"\(C_i\)", "latest ALPACA supply", "zone별 ALPACA 경쟁 공급량"),
         (r"\(K_i\)", r"\(\lceil \kappa \cdot \text{current PM supply}_i \rceil\)", "zone별 최대 배치 가능량"),
-        (r"\(r_i(x_i)\)", "clean Origin-Destination Pair flow 기반", "운영자 이동 의심 segment를 제외한 Origin-Destination Pair로 추정한 회수/재배치 비용"),
+        (r"\(r_i(x_i)\)", r"\(\rho L_i \log(1+Q_i(x_i))\)", "OD 거리와 묶음 이동 효과를 반영한 회수/재배치 비용"),
     ]
     body = "".join(
         f'<tr><td class="math-cell">{symbol}</td><td>{value}</td><td>{safe(note)}</td></tr>'
@@ -2849,12 +2868,11 @@ def render_html(
           </div>
           <div class="equation">
             <b>목적함수: 기대 profit 최대화</b>
-            <div class="math">\\[\\max_x \\sum_i \\left[(p_i-v)Q_i(x_i)-c_i x_i-r_i(x_i)\\right]\\]</div>
+            <div class="math">\\[\\max_x \\sum_i \\left[(p_i-v)Q_i(x_i)-r_i(x_i)\\right]\\]</div>
             <div class="equation-note">
               <strong><code>(p_i-v)</code>:</strong> ride 1건당 순수 운행마진입니다. <code>p_i</code>는 zone <code>i</code>에서 ride 1건이 만드는 평균 매출이고, <code>v</code>는 결제/정비/소모품 등 ride 1건이 발생할 때 같이 증가하는 변동비입니다.
               <br><strong><code>(p_i-v)Q_i(x_i)</code>:</strong> zone <code>i</code>에서 기대되는 총 운행이익입니다. 배치량 <code>x_i</code>가 커질수록 기대 ride 수 <code>Q_i(x_i)</code>가 늘어날 수 있으므로 이 항도 커질 수 있습니다.
-              <br><strong><code>-c_i x_i</code>:</strong> PM을 배치해두는 데 드는 일 운영비입니다. ride가 발생하지 않아도 PM을 현장에 두면 충전 관리, 보험/감가, 현장 관리, 민원 대응 같은 비용이 생기므로 배치 대수 <code>x_i</code>에 비례해 차감합니다.
-              <br><strong><code>-r_i(x_i)</code>:</strong> 이용 후 흩어진 PM을 다음 운영 시작 전에 다시 회수하거나 재배치하는 기대 비용입니다. Origin-Destination Pair flow가 불균형한 zone일수록 이 비용이 커질 수 있습니다.
+              <br><strong><code>-r_i(x_i)</code>:</strong> 이용 후 흩어진 PM을 다음 운영 시작 전에 다시 회수하거나 재배치하는 기대 비용입니다. 여러 대를 한 번에 회수할 수 있는 묶음 이동 효과를 반영하기 위해 <code>log(1+Q_i(x_i))</code>로 보정합니다.
             </div>
           </div>
           <div class="equation">
@@ -2903,7 +2921,7 @@ def render_html(
         <div class="metric"><div class="label">활성 zone</div><div class="value">{fmt_int(solution['active_zones'])}</div></div>
         <div class="metric"><div class="label">기대 rides</div><div class="value">{fmt_float(solution['expected_rides'], 1)}</div></div>
         <div class="metric"><div class="label">기대 revenue 운행매출</div><div class="value">{fmt_int(solution['expected_revenue_krw'])}</div></div>
-        <div class="metric"><div class="label">기대 total cost</div><div class="value">{fmt_int(solution['expected_variable_cost_krw'] + solution['expected_fixed_cost_krw'] + solution['expected_rebalancing_cost_krw'])}</div></div>
+        <div class="metric"><div class="label">기대 total cost</div><div class="value">{fmt_int(solution['expected_total_cost_krw'])}</div></div>
         <div class="metric"><div class="label">Objective value</div><div class="value">{fmt_int(solution['expected_profit_krw'])}</div></div>
       </div>
     </section>
@@ -2967,13 +2985,13 @@ def render_lab_shell(out_path: Path) -> None:
   <iframe
     class="hermes-lab-frame"
     data-hermes-lab-frame
-    src="./hermes_lab_workspace/optimization_model.html"
+    src="./hermes_lab_workspace/optimization_model.html?v=20260617-log-rebalance"
     title="실험실 모델">
   </iframe>
   <script>
     window.HERMES_AGENT_MODE = "lab";
   </script>
-  <script defer src="./hermes_widget.js"></script>
+  <script defer src="./hermes_widget.js?v=20260617-working-md"></script>
 </body>
 </html>
 """

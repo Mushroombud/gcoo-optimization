@@ -10,9 +10,10 @@
   const scriptUrl = script ? new URL(script.getAttribute("src") || "hermes_widget.js", window.location.href) : new URL("hermes_widget.js", window.location.href);
   const cssUrl = new URL("hermes_widget.css", scriptUrl);
   if (scriptUrl.search) cssUrl.search = scriptUrl.search;
-  const configuredBridge = window.HERMES_BRIDGE_URL || localStorage.getItem("hermesBridgeUrl") || "";
   const sameOriginBridge = window.location.protocol.startsWith("http") ? window.location.origin : "";
-  const bridgeUrl = (configuredBridge || sameOriginBridge || "http://127.0.0.1:8787").replace(/\/+$/, "");
+  const configuredBridge = window.HERMES_BRIDGE_URL || "";
+  const storedBridge = localStorage.getItem("hermesBridgeUrl") || "";
+  const bridgeUrl = (configuredBridge || sameOriginBridge || storedBridge || "http://127.0.0.1:8787").replace(/\/+$/, "");
   const mode = window.HERMES_AGENT_MODE || document.documentElement.dataset.hermesMode || document.body.dataset.hermesMode || "read";
   const isLab = mode === "lab";
   const isLabSidebar = isLab && (document.documentElement.dataset.hermesSidebar === "true" || document.body.dataset.hermesSidebar === "true");
@@ -281,9 +282,37 @@
     return out.join("");
   }
 
+  function normalizeRole(role) {
+    return String(role || "").trim().toLowerCase();
+  }
+
+  function clearWorkingState(item) {
+    item.classList.remove("working");
+    delete item.dataset.placeholder;
+    item.removeAttribute("aria-live");
+  }
+
+  function setAssistantWorking(item, text) {
+    const label = (text || "처리 중").trim() || "처리 중";
+    item.dataset.rawText = label;
+    item.dataset.placeholder = "status";
+    item.classList.remove("rendered", "error");
+    item.classList.add("working");
+    item.setAttribute("aria-live", "polite");
+    item.innerHTML = [
+      '<span class="hermes-working-indicator">',
+      '<span class="hermes-working-ring" aria-hidden="true"></span>',
+      `<span class="hermes-working-copy">${escapeHtml(label)}</span>`,
+      '<span class="hermes-working-dots" aria-hidden="true"><span></span><span></span><span></span></span>',
+      "</span>",
+    ].join("");
+  }
+
   function setMessageContent(item, role, text) {
+    const messageRole = normalizeRole(role);
     item.dataset.rawText = text || "";
-    if (role === "assistant") {
+    clearWorkingState(item);
+    if (messageRole === "assistant") {
       item.classList.add("rendered");
       item.innerHTML = renderMarkdown(text || "");
       scheduleMathTypeset(item);
@@ -294,8 +323,9 @@
   }
 
   function appendMessage(log, role, text) {
-    const item = el("div", `hermes-message ${role || ""}`.trim());
-    setMessageContent(item, role, text || "");
+    const messageRole = normalizeRole(role);
+    const item = el("div", `hermes-message ${messageRole || ""}`.trim());
+    setMessageContent(item, messageRole, text || "");
     log.appendChild(item);
     log.scrollTop = log.scrollHeight;
     return item;
@@ -355,6 +385,7 @@
   async function streamChat(message, log, sendButton, input, status) {
     appendMessage(log, "user", message);
     const assistant = appendMessage(log, "assistant", "");
+    setAssistantWorking(assistant, "요청 보내는 중");
     sendButton.disabled = true;
     status.textContent = "응답 중";
     let assistantHasAnswer = false;
@@ -380,9 +411,7 @@
         if (assistantHasAnswer) return;
         const next = (text || "처리 중").trim();
         if (!next) return;
-        assistant.dataset.placeholder = "status";
-        assistant.classList.remove("rendered");
-        assistant.textContent = next;
+        setAssistantWorking(assistant, next);
         log.scrollTop = log.scrollHeight;
       }
 
@@ -390,7 +419,7 @@
         if (!text) return;
         if (!assistantHasAnswer) {
           assistantHasAnswer = true;
-          delete assistant.dataset.placeholder;
+          clearWorkingState(assistant);
         }
         assistantText += text;
         setMessageContent(assistant, "assistant", assistantText);
@@ -410,17 +439,22 @@
             status.textContent = event.json.text || "처리 중";
             showAssistantStatus(event.json.text || "처리 중");
           } else if (event.type === "error") {
+            clearWorkingState(assistant);
             assistant.classList.add("error");
             assistant.textContent = event.json.text || "에이전트 연결 오류";
             assistantHasAnswer = true;
             assistantText = "";
-            delete assistant.dataset.placeholder;
           } else if (event.type === "done") {
-            if ((!assistantHasAnswer || assistant.dataset.placeholder === "status") && event.json.text) {
-              assistantText = event.json.text;
+            const finalText = event.json.text || "";
+            if (finalText) {
+              assistantText = finalText;
               setMessageContent(assistant, "assistant", assistantText);
               assistantHasAnswer = true;
-              delete assistant.dataset.placeholder;
+            } else if (!assistantHasAnswer || assistant.dataset.placeholder === "status") {
+              clearWorkingState(assistant);
+              assistant.classList.add("error");
+              assistant.textContent = "응답이 비어 있습니다";
+              assistantHasAnswer = true;
             }
             if (event.json.sessionId) setCurrentSessionId(event.json.sessionId);
             status.textContent = "연결됨";
@@ -437,6 +471,7 @@
         }
       }
     } catch (error) {
+      clearWorkingState(assistant);
       assistant.classList.add("error");
       assistant.textContent = "에이전트 서버 연결 필요";
       assistantHasAnswer = true;
@@ -522,9 +557,13 @@
     if (isLabSidebar) {
       savePanel = el("section", "hermes-save-panel");
       const saveActions = el("div", "hermes-save-actions");
+      const historyButton = el("button", "hermes-save-button");
+      historyButton.type = "button";
+      historyButton.setAttribute("aria-expanded", "false");
+      historyButton.append(icon("history"), el("span", "", "기록"));
       const saveButton = el("button", "hermes-save-button primary");
       saveButton.type = "button";
-      saveButton.append(icon("save"), el("span", "", "상태 저장"));
+      saveButton.append(icon("save"), el("span", "", "저장"));
       const restoreButton = el("button", "hermes-save-button");
       restoreButton.type = "button";
       restoreButton.disabled = true;
@@ -532,13 +571,21 @@
       const refreshButton = iconButton("hermes-icon-button", "refresh", "새로고침");
       const saveStatus = el("div", "hermes-save-status", "상태 확인 중");
       const saveTimeline = el("div", "hermes-save-timeline");
-      saveActions.append(saveButton, restoreButton, refreshButton);
+      saveActions.append(historyButton, saveButton, restoreButton, refreshButton);
       savePanel.append(saveActions, saveStatus, saveTimeline);
 
       let selectedSaveId = "";
+      let saveTimelineOpen = false;
+      const setSaveTimelineOpen = (open) => {
+        saveTimelineOpen = open;
+        saveTimeline.classList.toggle("open", open);
+        historyButton.classList.toggle("active", open);
+        historyButton.setAttribute("aria-expanded", open ? "true" : "false");
+        restoreButton.disabled = !open || restoreButton.dataset.canRestore !== "true";
+      };
       const setSaveBusy = (busy) => {
-        [saveButton, restoreButton, refreshButton].forEach((button) => {
-          button.disabled = busy || (button === restoreButton && button.dataset.canRestore !== "true");
+        [historyButton, saveButton, restoreButton, refreshButton].forEach((button) => {
+          button.disabled = busy || (button === restoreButton && (!saveTimelineOpen || button.dataset.canRestore !== "true"));
         });
       };
       const renderSaves = (payload) => {
@@ -583,7 +630,7 @@
         });
         saveStatus.textContent = payload.hasChanges ? `${payload.unsavedCount || 0}개 변경 있음` : "저장됨";
         restoreButton.dataset.canRestore = selectedSaveId && selectedSaveId !== currentId ? "true" : "false";
-        restoreButton.disabled = restoreButton.dataset.canRestore !== "true";
+        restoreButton.disabled = !saveTimelineOpen || restoreButton.dataset.canRestore !== "true";
       };
       loadSaves = async () => {
         saveStatus.textContent = "불러오는 중";
@@ -591,9 +638,14 @@
           const payload = await labGet("/api/lab/saves");
           renderSaves(payload);
         } catch (_error) {
-        saveStatus.textContent = "상태를 불러올 수 없음";
+          saveStatus.textContent = "상태를 불러올 수 없음";
         }
       };
+      historyButton.addEventListener("click", () => {
+        const nextOpen = !saveTimelineOpen;
+        setSaveTimelineOpen(nextOpen);
+        if (nextOpen) loadSaves();
+      });
       saveButton.addEventListener("click", async () => {
         setSaveBusy(true);
         saveStatus.textContent = "저장 중";

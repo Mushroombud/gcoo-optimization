@@ -40,7 +40,6 @@ NUMERIC_COLUMNS = [
     "x_obs_i",
     "B_i",
     "expected_revenue_per_ride_krw",
-    "fixed_cost_per_scooter_day_krw",
     "expected_operating_profit_krw",
     "expected_rebalancing_cost_krw",
     "expected_profit_after_rebalancing_krw",

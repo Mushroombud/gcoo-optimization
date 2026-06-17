@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 
-DEFAULT_WIDGET_SCRIPT = "./hermes_widget.js"
+DEFAULT_WIDGET_SCRIPT = "./hermes_widget.js?v=20260617-working-md"
 
 
 def inject_hermes_widget(path: Path, script_src: str = DEFAULT_WIDGET_SCRIPT) -> None:
