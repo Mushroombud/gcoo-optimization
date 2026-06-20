@@ -1,0 +1,21 @@
+{
+  "ok": true,
+  "status": "approved",
+  "message": "5분 내로 재계산 시 반영됩니다.",
+  "approved_at": "2026-06-18T08:26:09Z",
+  "approved_at_epoch": 1781771169.510672,
+  "source": "request_payload",
+  "source_results": "/root/gcoo-optimization/outputs/visualizations/parameter_search_results.json",
+  "lambda_market": 0.0,
+  "beta_capture": 0.2,
+  "theta_competition": 0.0,
+  "best_summary": {
+    "rank": 1,
+    "avg_unmet_rides": 36.73,
+    "total_unmet_rides": 3673,
+    "service_rate": 0.9864668690679714,
+    "shortage_zone_count": 26.41,
+    "expected_rides": 15625.178466183399,
+    "expected_profit_krw": 29229830.36340755
+  }
+}

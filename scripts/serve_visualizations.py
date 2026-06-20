@@ -18,7 +18,7 @@ SRC_DIR = REPO_ROOT / "src"
 if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
-from common import write_json  # noqa: E402
+from common import append_jsonl, write_json  # noqa: E402
 from visualize_optimization_model import (  # noqa: E402
     APPROVED_MODEL_PARAMETERS_FILE,
     PARAMETER_SEARCH_TRIALS,
@@ -42,6 +42,8 @@ UTF8_TYPES = {
 
 PARAMETER_SEARCH_LOCK = threading.Lock()
 PARAMETER_SEARCH_PROGRESS_LOCK = threading.Lock()
+PARAMETER_SEARCH_RESULTS_FILE = "parameter_search_results.json"
+PARAMETER_SEARCH_HISTORY_FILE = "parameter_search_results_history.jsonl"
 PARAMETER_SEARCH_PROGRESS = {
     "ok": True,
     "status": "not_run",
@@ -89,6 +91,9 @@ class Utf8StaticHandler(SimpleHTTPRequestHandler):
         parsed = urlparse(self.path)
         if parsed.path == "/api/parameter-search-progress":
             self.send_json(parameter_search_progress_snapshot())
+            return
+        if parsed.path == "/api/parameter-search-results":
+            self.handle_parameter_search_results()
             return
         if parsed.path.startswith("/api/"):
             self.proxy_to_hermes_bridge("GET")
@@ -165,7 +170,8 @@ class Utf8StaticHandler(SimpleHTTPRequestHandler):
                 progress_callback=update_parameter_search_progress,
                 model_parameters=model_parameters,
             )
-            write_json(output_dir / "parameter_search_results.json", result)
+            archive_existing_parameter_search_result(output_dir)
+            write_json(output_dir / PARAMETER_SEARCH_RESULTS_FILE, result)
             update_parameter_search_progress(
                 {
                     "ok": True,
@@ -202,6 +208,37 @@ class Utf8StaticHandler(SimpleHTTPRequestHandler):
         finally:
             PARAMETER_SEARCH_LOCK.release()
 
+    def handle_parameter_search_results(self) -> None:
+        output_dir = Path(getattr(self, "directory", REPO_ROOT / "outputs" / "visualizations")).resolve()
+        results_path = output_dir / PARAMETER_SEARCH_RESULTS_FILE
+        if not results_path.exists():
+            self.send_json(
+                {
+                    "ok": False,
+                    "status": "not_found",
+                    "error": f"{PARAMETER_SEARCH_RESULTS_FILE} does not exist yet.",
+                    "path": str(results_path),
+                },
+                status=404,
+            )
+            return
+
+        try:
+            payload = json.loads(results_path.read_text(encoding="utf-8"))
+            if not isinstance(payload, dict):
+                raise ValueError(f"{PARAMETER_SEARCH_RESULTS_FILE} is not a JSON object.")
+            stat = results_path.stat()
+            payload = {
+                **payload,
+                "record_path": str(results_path),
+                "record_updated_at_epoch": stat.st_mtime,
+                "record_updated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(stat.st_mtime)),
+            }
+            self.send_json(payload)
+        except Exception as exc:  # noqa: BLE001
+            self.log_error("parameter search result read failed: %s", exc)
+            self.send_json({"ok": False, "error": str(exc), "path": str(results_path)}, status=500)
+
     def handle_apply_best_constants(self) -> None:
         if PARAMETER_SEARCH_LOCK.locked():
             self.send_json(
@@ -211,7 +248,7 @@ class Utf8StaticHandler(SimpleHTTPRequestHandler):
             return
 
         output_dir = Path(getattr(self, "directory", REPO_ROOT / "outputs" / "visualizations")).resolve()
-        results_path = output_dir / "parameter_search_results.json"
+        results_path = output_dir / PARAMETER_SEARCH_RESULTS_FILE
         constants_path = output_dir / APPROVED_MODEL_PARAMETERS_FILE
         try:
             try:
@@ -356,6 +393,28 @@ def update_parameter_search_progress(update: dict) -> None:
 def parameter_search_progress_snapshot() -> dict:
     with PARAMETER_SEARCH_PROGRESS_LOCK:
         return dict(PARAMETER_SEARCH_PROGRESS)
+
+
+def archive_existing_parameter_search_result(output_dir: Path) -> None:
+    results_path = output_dir / PARAMETER_SEARCH_RESULTS_FILE
+    if not results_path.exists():
+        return
+    try:
+        payload = json.loads(results_path.read_text(encoding="utf-8"))
+        if not isinstance(payload, dict):
+            return
+        stat = results_path.stat()
+        append_jsonl(
+            output_dir / PARAMETER_SEARCH_HISTORY_FILE,
+            {
+                **payload,
+                "archived_from": str(results_path),
+                "archived_at_epoch": time.time(),
+                "previous_record_updated_at_epoch": stat.st_mtime,
+            },
+        )
+    except Exception:
+        return
 
 
 def parse_args() -> argparse.Namespace:

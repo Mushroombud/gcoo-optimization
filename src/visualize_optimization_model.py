@@ -2348,6 +2348,9 @@ def parameter_search_panel(
         </div>
         <div class="progress-detail" id="parameter-search-progress-detail">실제 완료된 case 수를 기준으로 ETA를 계산합니다.</div>
       </div>
+      <div class="run-subhead">마지막 Full-run 기록</div>
+      <div class="status-box" id="parameter-search-last-run-status">마지막 Full-run 결과를 불러오는 중입니다.</div>
+      <div id="parameter-search-last-run"></div>
       <div id="parameter-search-result"></div>
       <script>
       (() => {{
@@ -2360,6 +2363,8 @@ def parameter_search_panel(
         const progressLabel = document.getElementById("parameter-search-progress-label");
         const etaLabel = document.getElementById("parameter-search-eta-label");
         const progressDetail = document.getElementById("parameter-search-progress-detail");
+        const lastRunStatus = document.getElementById("parameter-search-last-run-status");
+        const lastRun = document.getElementById("parameter-search-last-run");
         let running = false;
         let mainRequestActive = false;
         let progressTimer = null;
@@ -2388,6 +2393,11 @@ def parameter_search_panel(
           if (!status) return;
           status.textContent = message;
           status.classList.toggle("error", isError);
+        }};
+        const setLastRunStatus = (message, isError = false) => {{
+          if (!lastRunStatus) return;
+          lastRunStatus.textContent = message;
+          lastRunStatus.classList.toggle("error", isError);
         }};
         const renderProgress = data => {{
           if (!progressPanel) return;
@@ -2423,7 +2433,8 @@ def parameter_search_panel(
                 progressTimer = null;
                 setRunning(false);
                 if (data.status === "complete") {{
-                  setStatus("Full-run 완료: 결과는 parameter_search_results.json에 저장되었습니다. 필요하면 이 페이지를 새로고침해 최신 결과를 확인하세요.");
+                  setStatus("Full-run 완료: 결과는 parameter_search_results.json에 저장되었고, 아래 마지막 기록 패널을 갱신합니다.");
+                  loadLatestFullRun();
                 }} else if (data.status === "failed") {{
                   setStatus(`Full-run 실패: ${{data.message || "원인을 확인할 수 없습니다."}}`, true);
                 }}
@@ -2445,52 +2456,15 @@ def parameter_search_panel(
           progressTimer = null;
           pollProgress();
         }};
-        const renderResults = data => {{
-          const best = data.best || {{}};
-          const rows = (data.top_results || []).map(item => `
-            <tr>
-              <td>${{item.rank}}</td>
-              <td>${{fmtFloat(item.lambda_market, 3)}}</td>
-              <td>${{fmtFloat(item.beta_capture, 3)}}</td>
-              <td>${{fmtFloat(item.theta_competition, 3)}}</td>
-              <td>${{fmtFloat(item.avg_unmet_rides ?? item.unmet_rides, 1)}}</td>
-              <td>${{fmtInt(item.total_unmet_rides)}}</td>
-              <td>${{fmtFloat(item.served_rides, 1)}}</td>
-              <td>${{fmtFloat(item.service_rate * 100, 1)}}%</td>
-              <td>${{fmtFloat(item.shortage_zone_count, 1)}}</td>
-              <td>${{fmtFloat(item.expected_rides, 1)}}</td>
-            </tr>
-          `).join("");
-          result.innerHTML = `
-            <div class="grid three" style="margin-top:14px;">
-              <div class="metric"><div class="label">Best λ</div><div class="value">${{fmtFloat(best.lambda_market, 3)}}</div></div>
-              <div class="metric"><div class="label">Best β</div><div class="value">${{fmtFloat(best.beta_capture, 3)}}</div></div>
-              <div class="metric"><div class="label">Best θ</div><div class="value">${{fmtFloat(best.theta_competition, 3)}}</div></div>
-              <div class="metric"><div class="label">Avg unmet rides</div><div class="value">${{fmtFloat(best.avg_unmet_rides ?? best.unmet_rides, 1)}}</div></div>
-              <div class="metric"><div class="label">Service rate</div><div class="value">${{fmtFloat(best.service_rate * 100, 1)}}%</div></div>
-              <div class="metric"><div class="label">Total cases</div><div class="value">${{fmtInt(data.case_count)}}</div></div>
-              <div class="metric"><div class="label">Workers</div><div class="value">${{fmtInt(data.worker_count)}}</div></div>
-            </div>
-            <div class="action-row">
-              <button class="primary-button" type="button" id="apply-best-constants">이 최적값 반영하기</button>
-              <span class="apply-note">(5분 내로 재계산 시 반영됩니다)</span>
-            </div>
-            <div class="status-box" id="apply-best-constants-status">아직 반영 요청하지 않았습니다.</div>
-            <div class="table-wrap compact-table sim-table">
-              <table>
-                <thead>
-                  <tr><th>Rank</th><th>λ</th><th>β</th><th>θ</th><th>Avg unmet</th><th>Total unmet</th><th>Avg served</th><th>Service</th><th>Shortage zones</th><th>Expected rides</th></tr>
-                </thead>
-                <tbody>${{rows}}</tbody>
-              </table>
-            </div>
-          `;
-          const applyButton = document.getElementById("apply-best-constants");
-          const applyStatus = document.getElementById("apply-best-constants-status");
-          if (applyButton) applyButton.addEventListener("click", async () => {{
+        const fmtKrw = value => `${{fmtInt(value)}}원`;
+        const bindApplyButton = (buttonId, statusId, best) => {{
+          const applyButton = document.getElementById(buttonId);
+          const applyStatus = document.getElementById(statusId);
+          if (!applyButton) return;
+          applyButton.addEventListener("click", async () => {{
             applyButton.disabled = true;
             if (applyStatus) {{
-              applyStatus.textContent = "최적 상수를 저장하고 있습니다. 5분 내로 재계산 시 반영됩니다.";
+              applyStatus.textContent = "최적 상수를 Optimization Model 승인값으로 저장하고 있습니다.";
               applyStatus.classList.remove("error");
             }}
             try {{
@@ -2504,16 +2478,147 @@ def parameter_search_panel(
                 throw new Error(applyData.error || "최적 상수를 저장하지 못했습니다.");
               }}
               if (applyStatus) {{
-                applyStatus.textContent = `반영 예약 완료: λ=${{fmtFloat(applyData.parameters.lambda_market, 3)}}, β=${{fmtFloat(applyData.parameters.beta_capture, 3)}}, θ=${{fmtFloat(applyData.parameters.theta_competition, 3)}}. 5분 내로 재계산 시 반영됩니다.`;
+                applyStatus.textContent = `적용 완료: λ=${{fmtFloat(applyData.parameters.lambda_market, 3)}}, β=${{fmtFloat(applyData.parameters.beta_capture, 3)}}, θ=${{fmtFloat(applyData.parameters.theta_competition, 3)}}가 Optimization Model 승인값으로 저장되었습니다. 다음 재계산부터 실제 모델 입력으로 사용됩니다.`;
               }}
             }} catch (error) {{
               if (applyStatus) {{
-                applyStatus.textContent = `반영 실패: ${{error.message}}`;
+                applyStatus.textContent = `적용 실패: ${{error.message}}`;
                 applyStatus.classList.add("error");
               }}
               applyButton.disabled = false;
             }}
           }});
+        }};
+        const renderResults = (data, target = result, options = {{}}) => {{
+          if (!target) return;
+          const suffix = options.suffix || "current";
+          const title = options.title || "Full-run 결과";
+          const best = data.best || {{}};
+          const baseline = data.baseline_parameters || {{}};
+          const baselineScore = data.baseline_score || {{}};
+          const demandScenario = data.demand_scenario || {{}};
+          const ranges = data.parameter_ranges || {{}};
+          const steps = data.parameter_steps || {{}};
+          const gridSize = data.parameter_grid_size || {{}};
+          const topResults = Array.isArray(data.top_results) && data.top_results.length
+            ? data.top_results
+            : (best.lambda_market !== undefined ? [best] : []);
+          const bestUnmet = Number(best.avg_unmet_rides ?? best.unmet_rides ?? 0);
+          const baselineUnmet = Number(baselineScore.avg_unmet_rides ?? 0);
+          const unmetDelta = baselineUnmet - bestUnmet;
+          const recordLabel = data.record_updated_at
+            ? `저장 시각 ${{data.record_updated_at}}`
+            : "parameter_search_results.json";
+          const rangeText = (name, digits = 3) => {{
+            const range = ranges[name] || [];
+            const step = steps[name];
+            if (range.length >= 2 && step !== undefined) {{
+              return `${{fmtFloat(range[0], digits)}}-${{fmtFloat(range[1], digits)}} · step ${{fmtFloat(step, 3)}}`;
+            }}
+            return "n/a";
+          }};
+          const rows = topResults.map(item => `
+            <tr>
+              <td>${{item.rank || ""}}</td>
+              <td>${{fmtFloat(item.lambda_market, 3)}}</td>
+              <td>${{fmtFloat(item.beta_capture, 3)}}</td>
+              <td>${{fmtFloat(item.theta_competition, 3)}}</td>
+              <td>${{fmtFloat(item.avg_unmet_rides ?? item.unmet_rides, 1)}}</td>
+              <td>${{fmtInt(item.total_unmet_rides)}}</td>
+              <td>${{fmtFloat(item.served_rides, 1)}}</td>
+              <td>${{fmtFloat(item.service_rate * 100, 1)}}%</td>
+              <td>${{fmtFloat(item.shortage_zone_count, 1)}}</td>
+              <td>${{fmtFloat(item.expected_rides, 1)}}</td>
+            </tr>
+          `).join("") || `<tr><td colspan="10">저장된 ranking row가 없습니다.</td></tr>`;
+          target.innerHTML = `
+            <div class="run-panel">
+              <h3>${{title}}</h3>
+              <p class="note">${{recordLabel}} · 총 ${{fmtInt(data.parameter_combination_count)}}개 parameter 조합 × ${{fmtInt(data.trials_per_parameter_combination)}}개 trial = ${{fmtInt(data.case_count)}} case</p>
+              <div class="simulation-grid">
+                <div class="sim-card">
+                  <b>Full-run baseline constants</b>
+                  <span>λ=${{fmtFloat(baseline.lambda_market, 3)}}, β=${{fmtFloat(baseline.beta_capture, 3)}}, θ=${{fmtFloat(baseline.theta_competition, 3)}}</span>
+                </div>
+                <div class="sim-card">
+                  <b>Search grid values</b>
+                  <span>λ ${{rangeText("lambda_market", 2)}}<br>β ${{rangeText("beta_capture", 3)}}<br>θ ${{rangeText("theta_competition", 2)}}</span>
+                </div>
+                <div class="sim-card">
+                  <b>Grid size</b>
+                  <span>λ ${{fmtInt(gridSize.lambda_market)}} × β ${{fmtInt(gridSize.beta_capture)}} × θ ${{fmtInt(gridSize.theta_competition)}} = ${{fmtInt(data.parameter_combination_count)}} combinations</span>
+                </div>
+                <div class="sim-card">
+                  <b>Runtime</b>
+                  <span>${{fmtInt(data.worker_count)}} workers · ${{fmtDuration(data.elapsed_seconds)}} · ${{fmtFloat(data.actual_cases_per_second, 1)}} cases/s</span>
+                </div>
+                <div class="sim-card">
+                  <b>Baseline simulation result</b>
+                  <span>avg unmet ${{fmtFloat(baselineUnmet, 1)}} · service ${{fmtFloat((baselineScore.service_rate || 0) * 100, 1)}}% · total unmet ${{fmtInt(baselineScore.total_unmet_rides)}}</span>
+                </div>
+                <div class="sim-card">
+                  <b>Demand scenario</b>
+                  <span>${{fmtInt(demandScenario.trial_count || data.trial_count)}} fixed synthetic days · avg demand ${{fmtFloat(demandScenario.avg_simulated_demand, 1)}} · avg events ${{fmtFloat(demandScenario.avg_event_count, 1)}}</span>
+                </div>
+              </div>
+              <div class="grid three" style="margin-top:14px;">
+                <div class="metric"><div class="label">Best λ</div><div class="value">${{fmtFloat(best.lambda_market, 3)}}</div></div>
+                <div class="metric"><div class="label">Best β</div><div class="value">${{fmtFloat(best.beta_capture, 3)}}</div></div>
+                <div class="metric"><div class="label">Best θ</div><div class="value">${{fmtFloat(best.theta_competition, 3)}}</div></div>
+                <div class="metric"><div class="label">Avg unmet rides</div><div class="value">${{fmtFloat(bestUnmet, 1)}}</div></div>
+                <div class="metric"><div class="label">Service rate</div><div class="value">${{fmtFloat(best.service_rate * 100, 1)}}%</div></div>
+                <div class="metric"><div class="label">Avg unmet 개선</div><div class="value">${{fmtFloat(unmetDelta, 1)}}</div></div>
+                <div class="metric"><div class="label">Expected rides</div><div class="value">${{fmtFloat(best.expected_rides, 1)}}</div></div>
+                <div class="metric"><div class="label">Expected profit</div><div class="value">${{fmtKrw(best.expected_profit_krw)}}</div></div>
+                <div class="metric"><div class="label">Active zones</div><div class="value">${{fmtInt(best.active_zones)}}</div></div>
+              </div>
+              <div class="action-row">
+                <button class="primary-button" type="button" id="apply-best-constants-${{suffix}}">Optimization Model에 적용하기</button>
+                <span class="apply-note">(다음 재계산부터 실제 λ/β/θ로 사용됩니다)</span>
+              </div>
+              <div class="status-box" id="apply-best-constants-status-${{suffix}}">아직 적용하지 않았습니다.</div>
+              <div class="table-wrap compact-table sim-table">
+                <table>
+                  <thead>
+                    <tr><th>Rank</th><th>λ</th><th>β</th><th>θ</th><th>Avg unmet</th><th>Total unmet</th><th>Avg served</th><th>Service</th><th>Shortage zones</th><th>Expected rides</th></tr>
+                  </thead>
+                  <tbody>${{rows}}</tbody>
+                </table>
+              </div>
+            </div>
+          `;
+          bindApplyButton(`apply-best-constants-${{suffix}}`, `apply-best-constants-status-${{suffix}}`, best);
+        }};
+
+        const loadLatestFullRun = async (knownData = null) => {{
+          try {{
+            const data = knownData || await (async () => {{
+              const response = await fetch("./api/parameter-search-results", {{ cache: "no-store" }});
+              const payload = await response.json().catch(() => ({{ ok: false, error: "Invalid JSON response" }}));
+              if (!response.ok || !payload.ok) {{
+                throw new Error(payload.error || "저장된 Full-run 결과를 불러오지 못했습니다.");
+              }}
+              return payload;
+            }})();
+            renderResults(data, lastRun, {{ suffix: "latest", title: "마지막 Full-run 결과" }});
+            setLastRunStatus(`마지막 Full-run 기록을 표시했습니다. best λ=${{fmtFloat((data.best || {{}}).lambda_market, 3)}}, β=${{fmtFloat((data.best || {{}}).beta_capture, 3)}}, θ=${{fmtFloat((data.best || {{}}).theta_competition, 3)}}.`);
+            return data;
+          }} catch (apiError) {{
+            try {{
+              const response = await fetch("./parameter_search_results.json", {{ cache: "no-store" }});
+              const data = await response.json();
+              if (!response.ok || !data.ok) {{
+                throw new Error(data.error || "parameter_search_results.json에 완료된 Full-run 결과가 없습니다.");
+              }}
+              renderResults(data, lastRun, {{ suffix: "latest", title: "마지막 Full-run 결과" }});
+              setLastRunStatus("마지막 Full-run 기록을 정적 JSON 파일에서 표시했습니다. 적용 버튼은 serve_visualizations.py 서버가 떠 있어야 작동합니다.");
+              return data;
+            }} catch (fileError) {{
+              if (lastRun) lastRun.innerHTML = "";
+              setLastRunStatus(`저장된 Full-run 기록을 표시할 수 없습니다: ${{apiError.message || fileError.message}}`, true);
+              return null;
+            }}
+          }}
         }};
 
         const resumeRunningProgress = async () => {{
@@ -2556,7 +2661,8 @@ def parameter_search_panel(
               setStatus(message, true);
               return;
             }}
-            renderResults(data);
+            renderResults(data, result, {{ suffix: "current", title: "방금 완료된 Full-run 결과" }});
+            loadLatestFullRun(data);
             renderProgress({{
               ok: true,
               status: "complete",
@@ -2578,6 +2684,7 @@ def parameter_search_panel(
             setRunning(false);
           }}
         }});
+        loadLatestFullRun();
         resumeRunningProgress();
       }})();
       </script>
@@ -2815,6 +2922,10 @@ def render_html(
     .sim-card b {{ display: block; margin-bottom: 5px; color: var(--ink); }}
     .sim-card span {{ display: block; color: var(--muted); font-size: 13px; line-height: 1.55; }}
     .sim-table {{ margin-top: 12px; max-height: none; }}
+    .run-subhead {{ margin-top: 16px; font-weight: 900; color: var(--ink); }}
+    .run-panel {{ margin-top: 10px; border: 1px solid var(--line); border-radius: 8px; padding: 14px; background: #fff; }}
+    .run-panel h3 {{ margin: 0 0 10px; font-size: 16px; }}
+    .run-panel .note {{ margin-top: 6px; }}
     .action-row {{ display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-top: 14px; }}
     .primary-button {{ border: 1px solid var(--green); background: var(--green); color: #fff; border-radius: 8px; padding: 10px 14px; font-weight: 800; cursor: pointer; }}
     .primary-button[disabled] {{ cursor: not-allowed; opacity: .58; }}

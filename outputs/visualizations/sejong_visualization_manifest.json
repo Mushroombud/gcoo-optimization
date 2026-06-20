@@ -1,11 +1,11 @@
 {
-  "processed_dir": "data/processed/sejong_tago",
-  "charts_dashboard": "outputs/visualizations/sejong_charts_dashboard.html",
-  "map": "outputs/visualizations/sejong_map.html",
+  "processed_dir": "/root/gcoo-optimization/data/processed/sejong_tago",
+  "charts_dashboard": "/root/gcoo-optimization/outputs/visualizations/sejong_charts_dashboard.html",
+  "map": "/root/gcoo-optimization/outputs/visualizations/sejong_map.html",
   "ride_outputs": {
-    "ride_segments": "data/processed/sejong_tago/sejong_pm_inferred_rides.csv",
-    "operator_move_candidates": "data/processed/sejong_tago/sejong_pm_operator_move_candidates.csv",
-    "od_flows": "data/processed/sejong_tago/sejong_pm_od_flows.csv"
+    "ride_segments": "/root/gcoo-optimization/data/processed/sejong_tago/sejong_pm_inferred_rides.csv",
+    "operator_move_candidates": "/root/gcoo-optimization/data/processed/sejong_tago/sejong_pm_operator_move_candidates.csv",
+    "od_flows": "/root/gcoo-optimization/data/processed/sejong_tago/sejong_pm_od_flows.csv"
   },
   "ride_thresholds": {
     "reference_interval_minutes": 5.0,
@@ -24,35 +24,35 @@
     "max_od_lines": 120
   },
   "map_result": {
-    "latest_rows": 4191,
-    "zone_markers": 356,
-    "device_markers": 1500,
+    "latest_rows": 1368,
+    "zone_markers": 195,
+    "device_markers": 1368,
     "center": [
-      36.494742,
-      127.283858
+      36.372253,
+      127.3419775
     ],
     "ride_summary": {
-      "ride_segments": 22132,
-      "demand_ride_segments": 21053,
-      "excluded_operator_move_segments": 1079,
-      "excluded_operator_move_devices": 760,
-      "ride_devices": 2510,
+      "ride_segments": 33432,
+      "demand_ride_segments": 31663,
+      "excluded_operator_move_segments": 1769,
+      "excluded_operator_move_devices": 1116,
+      "ride_devices": 2581,
       "ride_operators": 1,
-      "avg_distance_m": 898.7837261968104,
-      "median_distance_m": 775.1342142543178,
+      "avg_distance_m": 884.3775370706786,
+      "median_distance_m": 771.4896987226683,
       "max_distance_m": 16252.731655405209,
-      "avg_speed_kmph": 8.841626430405967,
+      "avg_speed_kmph": 9.313657933026374,
       "first_timestamp": "2026-06-12T15:40:10+0900",
-      "last_timestamp": "2026-06-18T02:45:10+0900",
-      "od_pairs": 3221,
-      "total_segments": 22132,
-      "demand_segments": 21053,
-      "excluded_segments": 1079,
-      "excluded_devices": 760,
-      "speed_rule_segments": 1012,
-      "repeat_rule_segments": 103,
-      "cluster_rule_segments": 126,
-      "battery_rule_segments": 154,
+      "last_timestamp": "2026-06-21T00:35:07+0900",
+      "od_pairs": 3587,
+      "total_segments": 33432,
+      "demand_segments": 31663,
+      "excluded_segments": 1769,
+      "excluded_devices": 1116,
+      "speed_rule_segments": 1655,
+      "repeat_rule_segments": 139,
+      "cluster_rule_segments": 222,
+      "battery_rule_segments": 302,
       "max_excluded_speed_kmph": 188.2371405025781,
       "rendered_ride_segments": 1000,
       "rendered_operator_move_candidates": 1000,
@@ -63,7 +63,7 @@
   },
   "tables": {
     "accumulated": {
-      "rows": 5565032,
+      "rows": 9062819,
       "columns": [
         "timestamp",
         "operator_name",
@@ -85,7 +85,7 @@
       ]
     },
     "latest": {
-      "rows": 4191,
+      "rows": 1368,
       "columns": [
         "timestamp",
         "operator_name",
@@ -107,7 +107,7 @@
       ]
     },
     "operator_counts": {
-      "rows": 2666,
+      "rows": 4334,
       "columns": [
         "timestamp",
         "operator_name",
@@ -121,7 +121,7 @@
       ]
     },
     "zone_counts": {
-      "rows": 524981,
+      "rows": 848678,
       "columns": [
         "timestamp",
         "zone_id",
@@ -134,7 +134,7 @@
       ]
     },
     "device_intervals": {
-      "rows": 5560841,
+      "rows": 9058621,
       "columns": [
         "timestamp",
         "prev_timestamp",
@@ -160,7 +160,7 @@
       ]
     },
     "activity_by_zone": {
-      "rows": 524597,
+      "rows": 848288,
       "columns": [
         "timestamp",
         "zone_id",
@@ -177,7 +177,7 @@
       ]
     },
     "ride_segments": {
-      "rows": 22132,
+      "rows": 33432,
       "columns": [
         "ride_segment_id",
         "timestamp",
@@ -212,7 +212,7 @@
       ]
     },
     "od_flows": {
-      "rows": 3221,
+      "rows": 3587,
       "columns": [
         "prev_zone_id",
         "zone_id",
