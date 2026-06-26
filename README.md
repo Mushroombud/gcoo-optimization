@@ -127,10 +127,10 @@ Ux_i
 
 ## 4. Adjusted Demand Potential
 
-기본 수요는 inferred ride origin count에서 출발합니다.
+기본 수요는 완전 관측 운영일 기준 inferred ride origin 일평균 count에서 출발합니다.
 
 ```math
-D_i = \text{inferred rides starting from zone } i
+D_i = \text{average daily inferred rides starting from zone } i
 ```
 
 경쟁사 ALPACA 공급량은 두 가지 의미를 가집니다.

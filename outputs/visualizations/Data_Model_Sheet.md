@@ -164,7 +164,8 @@ distance_m >= 100m
 zone별 기본 demand signal은 다음처럼 만든다.
 
 ```text
-D_i = inferred ride segments starting from zone i
+D_i = average daily inferred ride segments starting from zone i
+      using complete observed operating days
       where excluded_from_demand = false
 ```
 
@@ -174,7 +175,7 @@ D_i = inferred ride segments starting from zone i
 D_i = η R_i
 ```
 
-`R_i`는 관측된 inferred ride origin count이고, `η`는 snapshot이 포착하지 못한 실제 수요를 보정하는 scale parameter이다.
+`R_i`는 관측된 inferred ride origin 일평균 count이고, `η`는 snapshot이 포착하지 못한 실제 수요를 보정하는 scale parameter이다.
 
 ---
 
@@ -312,10 +313,10 @@ Q_i(x_i) \le Ux_i
 
 ## 3.4 Adjusted Demand Potential
 
-기본 demand는 inferred ride origin count에서 출발한다.
+기본 demand는 완전 관측 운영일 기준 inferred ride origin 일평균 count에서 출발한다.
 
 ```math
-D_i = \text{inferred rides starting from zone } i
+D_i = \text{average daily inferred rides starting from zone } i
 ```
 
 하지만 경쟁사 공급량은 단순히 나쁜 신호만은 아니다. ALPACA가 많이 놓인 곳은 경쟁이 심한 곳이기도 하지만, 동시에 PM 수요가 검증된 시장일 수도 있다. 그래서 보정된 잠재수요를 다음처럼 둔다.
@@ -450,7 +451,7 @@ x_i \in \mathbb{Z}_+
 
 | Parameter | 계산 방식 | 의미 |
 | --- | --- | --- |
-| `D_i` | `sejong_pm_inferred_rides.csv` 중 `excluded_from_demand=false`인 origin zone별 count | zone별 기본 demand signal |
+| `D_i` | `sejong_pm_inferred_rides.csv` 중 `excluded_from_demand=false`인 segment를 완전 관측 운영일 기준으로 나눈 origin zone별 일평균 count | zone별 기본 demand signal |
 | `C_i` | latest snapshot의 zone별 ALPACA device count | 경쟁사 공급량 |
 | `G_i` | latest snapshot의 zone별 GBIKE device count | 현재 GBIKE 공급량 |
 | `A_i` | `D_i(1 + λ log(1+C_i)/log(1+C_max))` | 보정된 잠재수요 |
@@ -920,7 +921,7 @@ x_{i,\text{NEW}} \le M y_i
 
 2. **Demand Construction**
 
-   연속 snapshot 간 이동을 이용해 inferred ride를 만들고, origin zone별 count를 기본 수요 `D_i`로 사용한다.
+   연속 snapshot 간 이동을 이용해 inferred ride를 만들고, 완전 관측 운영일 기준 origin zone별 일평균 count를 기본 수요 `D_i`로 사용한다.
 
 3. **Linear Baseline**
 

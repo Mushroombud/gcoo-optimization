@@ -24,36 +24,36 @@
     "max_od_lines": 120
   },
   "map_result": {
-    "latest_rows": 1368,
-    "zone_markers": 195,
-    "device_markers": 1368,
+    "latest_rows": 4201,
+    "zone_markers": 365,
+    "device_markers": 1500,
     "center": [
-      36.372253,
-      127.3419775
+      36.494843,
+      127.283845
     ],
     "ride_summary": {
-      "ride_segments": 33432,
-      "demand_ride_segments": 31663,
-      "excluded_operator_move_segments": 1769,
-      "excluded_operator_move_devices": 1116,
-      "ride_devices": 2581,
+      "ride_segments": 38532,
+      "demand_ride_segments": 36363,
+      "excluded_operator_move_segments": 2169,
+      "excluded_operator_move_devices": 1276,
+      "ride_devices": 2589,
       "ride_operators": 1,
-      "avg_distance_m": 884.3775370706786,
-      "median_distance_m": 771.4896987226683,
-      "max_distance_m": 16252.731655405209,
-      "avg_speed_kmph": 9.313657933026374,
+      "avg_distance_m": 885.7914274182625,
+      "median_distance_m": 774.3264297587142,
+      "max_distance_m": 16889.619806395185,
+      "avg_speed_kmph": 9.490381886505915,
       "first_timestamp": "2026-06-12T15:40:10+0900",
-      "last_timestamp": "2026-06-21T00:35:07+0900",
-      "od_pairs": 3587,
-      "total_segments": 33432,
-      "demand_segments": 31663,
-      "excluded_segments": 1769,
-      "excluded_devices": 1116,
-      "speed_rule_segments": 1655,
-      "repeat_rule_segments": 139,
-      "cluster_rule_segments": 222,
-      "battery_rule_segments": 302,
-      "max_excluded_speed_kmph": 188.2371405025781,
+      "last_timestamp": "2026-06-22T12:00:20+0900",
+      "od_pairs": 3735,
+      "total_segments": 38532,
+      "demand_segments": 36363,
+      "excluded_segments": 2169,
+      "excluded_devices": 1276,
+      "speed_rule_segments": 2030,
+      "repeat_rule_segments": 178,
+      "cluster_rule_segments": 289,
+      "battery_rule_segments": 360,
+      "max_excluded_speed_kmph": 201.64746643631375,
       "rendered_ride_segments": 1000,
       "rendered_operator_move_candidates": 1000,
       "rendered_od_flows": 120,
@@ -63,7 +63,7 @@
   },
   "tables": {
     "accumulated": {
-      "rows": 9062819,
+      "rows": 10843360,
       "columns": [
         "timestamp",
         "operator_name",
@@ -85,7 +85,7 @@
       ]
     },
     "latest": {
-      "rows": 1368,
+      "rows": 4201,
       "columns": [
         "timestamp",
         "operator_name",
@@ -107,7 +107,7 @@
       ]
     },
     "operator_counts": {
-      "rows": 4334,
+      "rows": 5182,
       "columns": [
         "timestamp",
         "operator_name",
@@ -121,7 +121,7 @@
       ]
     },
     "zone_counts": {
-      "rows": 848678,
+      "rows": 1015265,
       "columns": [
         "timestamp",
         "zone_id",
@@ -134,7 +134,7 @@
       ]
     },
     "device_intervals": {
-      "rows": 9058621,
+      "rows": 10839159,
       "columns": [
         "timestamp",
         "prev_timestamp",
@@ -160,7 +160,7 @@
       ]
     },
     "activity_by_zone": {
-      "rows": 848288,
+      "rows": 1014872,
       "columns": [
         "timestamp",
         "zone_id",
@@ -177,7 +177,7 @@
       ]
     },
     "ride_segments": {
-      "rows": 33432,
+      "rows": 38532,
       "columns": [
         "ride_segment_id",
         "timestamp",
@@ -212,7 +212,7 @@
       ]
     },
     "od_flows": {
-      "rows": 3587,
+      "rows": 3735,
       "columns": [
         "prev_zone_id",
         "zone_id",

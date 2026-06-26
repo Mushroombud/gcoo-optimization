@@ -120,7 +120,7 @@ def read_approved_model_parameters(out_dir: Path) -> dict[str, Any]:
         "approved_at": payload.get("approved_at"),
         "source_results": payload.get("source_results"),
         "note": payload.get("message", "Using approved calibration constants."),
-        "raw": payload,
+        "raw": {key: value for key, value in payload.items() if key != "best_summary"},
     }
 
 
@@ -185,6 +185,72 @@ def zone_profit(
     return ride_margin - rebalance_cost
 
 
+def add_operating_day(seg: pd.DataFrame) -> pd.DataFrame:
+    if seg.empty or "timestamp" not in seg.columns:
+        return seg.copy()
+    rows = seg.copy()
+    timestamps = pd.to_datetime(rows["timestamp"], errors="coerce", utc=True)
+    rows = rows[timestamps.notna()].copy()
+    if rows.empty:
+        return rows
+    rows["timestamp_kst"] = timestamps[timestamps.notna()].dt.tz_convert("Asia/Seoul")
+    rows["operating_day"] = (rows["timestamp_kst"] - pd.Timedelta(hours=4)).dt.date.astype(str)
+    return rows
+
+
+def select_demand_scale_segments(segments: pd.DataFrame) -> tuple[pd.DataFrame, dict[str, Any]]:
+    if segments.empty:
+        return segments.copy(), {
+            "observed_days": 0,
+            "scale_days": 1,
+            "selected_days": [],
+            "excluded_boundary_days": [],
+            "basis": "empty",
+            "note": "No clean ride segments were available for demand scaling.",
+        }
+
+    timed = add_operating_day(segments)
+    if timed.empty or "operating_day" not in timed.columns:
+        return segments.copy(), {
+            "observed_days": 0,
+            "scale_days": 1,
+            "selected_days": [],
+            "excluded_boundary_days": [],
+            "basis": "all_clean_segments_no_valid_timestamp",
+            "note": "Valid timestamps were unavailable, so demand scaling used all clean segments without day normalization.",
+        }
+
+    observed_days = sorted(timed["operating_day"].dropna().astype(str).unique().tolist())
+    selected_days = observed_days
+    excluded_boundary_days: list[str] = []
+    basis = "all_observed_operating_days"
+    if len(observed_days) > 2:
+        selected_days = observed_days[1:-1]
+        excluded_boundary_days = [observed_days[0], observed_days[-1]]
+        basis = "complete_interior_operating_days"
+
+    selected = timed[timed["operating_day"].isin(selected_days)].copy()
+    if selected.empty:
+        selected = timed.copy()
+        selected_days = observed_days
+        excluded_boundary_days = []
+        basis = "all_observed_operating_days_fallback"
+
+    scale_days = max(1, len(selected_days))
+    return selected, {
+        "observed_days": len(observed_days),
+        "scale_days": scale_days,
+        "selected_days": selected_days,
+        "excluded_boundary_days": excluded_boundary_days,
+        "basis": basis,
+        "note": (
+            "D_i is normalized to average clean inferred rides per operating day. "
+            "Boundary operating days are excluded when at least three observed days exist, "
+            "because the first/last collection-window days are often partial."
+        ),
+    }
+
+
 def build_zone_model(processed_dir: Path, lambda_market: float = LAMBDA_MARKET) -> tuple[pd.DataFrame, dict[str, Any]]:
     latest = read_csv(processed_dir / "sejong_pm_latest_snapshot.csv")
     segments = read_csv(processed_dir / "sejong_pm_inferred_rides.csv")
@@ -233,8 +299,10 @@ def build_zone_model(processed_dir: Path, lambda_market: float = LAMBDA_MARKET) 
         excluded_segment_count = int(excluded_mask.sum())
         segments = segments[~excluded_mask].copy()
 
-    if not segments.empty and {"prev_zone_id", "distance_m", "speed_kmph", "battery_delta"}.issubset(segments.columns):
-        seg = segments.copy()
+    demand_segments, demand_scale = select_demand_scale_segments(segments)
+
+    if not demand_segments.empty and {"prev_zone_id", "distance_m", "speed_kmph", "battery_delta"}.issubset(demand_segments.columns):
+        seg = demand_segments.copy()
         seg["prev_zone_id"] = seg["prev_zone_id"].astype(str)
         for col in ["distance_m", "speed_kmph", "battery_delta"]:
             seg[col] = pd.to_numeric(seg[col], errors="coerce")
@@ -290,7 +358,8 @@ def build_zone_model(processed_dir: Path, lambda_market: float = LAMBDA_MARKET) 
     max_competitor = float(model["alpaca_competitor"].max())
     denominator = math.log1p(max_competitor) if max_competitor > 0 else 1.0
     model["competition_index"] = model["alpaca_competitor"].map(lambda value: math.log1p(float(value)) / denominator)
-    model["D_i"] = model["inferred_rides"].astype(float)
+    demand_scale_days = max(1, int(demand_scale["scale_days"]))
+    model["D_i"] = model["inferred_rides"].astype(float) / demand_scale_days
     model["A_i"] = model["D_i"] * (1.0 + float(lambda_market) * model["competition_index"])
     model["K_i"] = (CAPACITY_MULTIPLIER * model["total_current_pm"]).map(math.ceil)
     model.loc[(model["K_i"] <= 0) & (model["A_i"] > 0), "K_i"] = 3
@@ -306,6 +375,14 @@ def build_zone_model(processed_dir: Path, lambda_market: float = LAMBDA_MARKET) 
         "zones": int(model["zone_id"].nunique()),
         "raw_ride_segments": raw_segment_count,
         "ride_segments": int(len(segments)),
+        "demand_source_segments": int(len(demand_segments)),
+        "demand_observed_days": int(demand_scale["observed_days"]),
+        "demand_scale_days": demand_scale_days,
+        "demand_scale_basis": str(demand_scale["basis"]),
+        "demand_scale_selected_days": demand_scale["selected_days"],
+        "demand_scale_excluded_boundary_days": demand_scale["excluded_boundary_days"],
+        "avg_daily_demand_segments": float(len(demand_segments) / demand_scale_days),
+        "demand_scale_note": demand_scale["note"],
         "excluded_operator_move_segments": excluded_segment_count,
         "od_pairs": int(len(od_flows)),
         "operator_move_filter_note": OPERATOR_MOVE_FILTER_NOTE,
@@ -2750,8 +2827,8 @@ def data_parameter_table() -> str:
     rows = [
         (
             r"\(D_i\)",
-            "clean inferred ride origin count",
-            "운영자 이동 의심 flag가 없는 GBIKE 이동 segment만 사용한 zone별 기본 수요",
+            "avg daily clean inferred ride origin count",
+            "완전 관측된 운영일의 clean GBIKE 이동 segment를 origin zone별로 나눈 하루 평균 기본 수요",
         ),
         (r"\(C_i\)", "latest ALPACA supply", "zone별 ALPACA 경쟁 공급량"),
         (r"\(K_i\)", r"\(\lceil \kappa \cdot \text{current PM supply}_i \rceil\)", "zone별 최대 배치 가능량"),
@@ -2862,6 +2939,11 @@ def render_html(
     raw_ride_segments = int(meta.get("raw_ride_segments", meta.get("ride_segments", 0)))
     clean_ride_segments = int(meta.get("ride_segments", 0))
     excluded_operator_moves = int(meta.get("excluded_operator_move_segments", 0))
+    demand_source_segments = int(meta.get("demand_source_segments", clean_ride_segments))
+    demand_scale_days = int(meta.get("demand_scale_days", 1))
+    avg_daily_demand_segments = float(meta.get("avg_daily_demand_segments", demand_source_segments / max(1, demand_scale_days)))
+    excluded_boundary_days = meta.get("demand_scale_excluded_boundary_days", [])
+    excluded_boundary_text = ", ".join(map(str, excluded_boundary_days)) if excluded_boundary_days else "없음"
     html_text = f"""<!doctype html>
 <html lang="ko">
 <head>
@@ -3004,7 +3086,7 @@ def render_html(
             <b>보정된 잠재수요</b>
             <div class="math">\\[A_i=D_i\\left(1+\\lambda\\frac{{\\log(1+C_i)}}{{\\log(1+C_{{\\max}})}}\\right)\\]</div>
             <div class="equation-note">
-              <strong>모델링 근거:</strong> <code>D_i</code>는 GBIKE device movement에서 추정한 기본 수요입니다. 하지만 경쟁사 PM이 많이 놓인 지역은 단순히 경쟁이 심한 곳일 뿐 아니라, PM 시장이 실제로 존재한다고 검증된 지역일 수도 있습니다.
+              <strong>모델링 근거:</strong> <code>D_i</code>는 GBIKE device movement에서 추정한 clean ride segment를 운영일 기준 하루 평균으로 정규화한 기본 수요입니다. 하지만 경쟁사 PM이 많이 놓인 지역은 단순히 경쟁이 심한 곳일 뿐 아니라, PM 시장이 실제로 존재한다고 검증된 지역일 수도 있습니다.
               <br><strong>운영자 이동 제외:</strong> <code>D_i</code>와 Origin-Destination Pair flow는 운영자가 차량으로 이동시킨 것으로 의심되는 segment를 제외한 clean movement만 사용합니다.
               <br><strong>왜 log인가:</strong> 경쟁사가 0대에서 10대로 늘어나는 것은 강한 시장 신호지만, 100대에서 110대로 늘어나는 것은 추가 정보가 상대적으로 작습니다. 그래서 <code>log(1+C_i)</code>를 사용해 market validation 효과도 체감하도록 설계했습니다.
               <br><strong>λ의 의미:</strong> <code>λ</code>는 경쟁사 존재를 잠재수요 증가 신호로 얼마나 강하게 볼지 정하는 parameter입니다.
@@ -3024,7 +3106,7 @@ def render_html(
         <div class="table-wrap compact-table" style="max-height:none;">{data_parameter_table()}</div>
         <div class="equation-note" style="margin-top:10px;">
           <strong>운영자 이동 제외 Rule:</strong> 속도 &gt; 28km/h, 또는 속도 &gt; 25km/h이면서 30분 내 반복 고속 이동, 같은 시간/Origin-Destination Pair의 2대 이상 군집, 배터리 변화량 절댓값 20pp 이상인 segment는 <code>excluded_from_demand=true</code>로 두고 수요/Origin-Destination Pair 계산에서 제외합니다.
-          이번 run에서는 raw ride segment {fmt_int(raw_ride_segments)}건 중 {fmt_int(excluded_operator_moves)}건을 제외하고 {fmt_int(clean_ride_segments)}건을 사용했습니다.
+          이번 run에서는 raw ride segment {fmt_int(raw_ride_segments)}건 중 {fmt_int(excluded_operator_moves)}건을 제외한 clean segment {fmt_int(clean_ride_segments)}건을 확인했습니다. <code>D_i</code>는 boundary partial day({safe(excluded_boundary_text)})를 제외한 {fmt_int(demand_source_segments)}건 / {fmt_int(demand_scale_days)}일 = {fmt_float(avg_daily_demand_segments, 1)} rides/day 기준으로 계산했습니다.
         </div>
       </div>
     </section>
